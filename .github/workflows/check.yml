@@ -1,0 +1,39 @@
+name: Static checks
+
+# 只做静态检查：实跑要模拟器、显卡和游戏，在维护者和平台负责人自己的测试机上跑（见 README）。
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout without persistent credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Checkout ModAVD for its privacy scanner
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ModAVD/ModAVD
+          path: .modavd
+          persist-credentials: false
+      - name: Parse every PowerShell file
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -File -Include *.ps1, *.psd1 | Where-Object { $_.FullName -notmatch '[\\/]\.modavd[\\/]' } | ForEach-Object {
+              $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+              foreach ($e in $errors) { Write-Host "$($_.FullName):$($e.Extent.StartLineNumber): $($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+      - name: Compile the Python helpers
+        run: python3 -m py_compile items/maayys_run.py
+      - name: Scan tracked files for private identity and paths
+        run: python3 .modavd/scripts/privacy.py .
