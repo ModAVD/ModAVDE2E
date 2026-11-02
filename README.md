@@ -1,5 +1,9 @@
 # ModAVDE2E
 
+**简体中文** | [English](README.en.md)
+
+<!-- README.md 和 README.en.md 逐节对应：改了其中一份，请在同一个 PR 里把另一份也改了。 -->
+
 [ModAVD](https://github.com/ModAVD/ModAVD) 的端到端测试：在装好的整包上跑发版前回归，测的是用户真正用到的那条路：
 执行桥装卸、新建和扩容数据盘、从上一版升级、随包的宿主输入法、各游戏用自己的自动化脚本实跑。
 跑出来的结果表 `results.md` 贴进 ModAVD 仓库 `tools/pubrel/config/changes.md` 的「发布前回归」，跟着 Release 说明发出去。
