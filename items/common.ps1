@@ -71,7 +71,7 @@ function Get-InstancePorts([int]$i, [string]$Root = $script:Root, [string]$Exe) 
     $script:PortsCache[$key]
 }
 
-# 根目录的端口段（list --json 的 port_base）。还不认 portBase 的 modavd（ModAVDManager#20 以前）没有这一项，返回 $null，
+# 根目录的端口段（list --json 的 port_base）。还不认 portBase 的 modavd（ModAVD/ModAVD#75 以前）没有这一项，返回 $null，
 # 它的实例都在 20000 段上。
 function Get-PortBase([string]$Root = $script:Root, [string]$Exe) {
     $d = Invoke-ModavdJson $Root $Exe @('list')
