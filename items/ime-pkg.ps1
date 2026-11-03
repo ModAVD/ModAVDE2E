@@ -27,7 +27,7 @@ param(
     # （modavd 不让）：取 AdbPort - 1 会撞 20000 段 9 号的 gRPC（20092）
     [int]$ScriptAdbPort = $AdbPort + 1,
     # 这个根目录的端口段（mas-avd.json 的 portBase），实例就不和同机生产根目录的同编号实例抢端口；0 = 不写，用 20000 段
-    [int]$PortBase = 22000,
+    [int]$PortBase = 23000,
     # 测试 APK（org.modavd.ime.testapp，ModAVDHostIME 编的，不随包发）和开发签名的同一个输入法
     # （ImeTestApk、DevImeApk）
     [string]$TestApk,

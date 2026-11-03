@@ -21,7 +21,7 @@ and the bundled scripts in `package/` and the bridge in `bridge/` of the ModAVD 
 - **Use newly created test instances logged in with test accounts.** Do not run on an instance logged in with your main account: several items create instances, delete instances and force-stop the game.
 - adb uses only private ports. It does not touch 5037, and it does not touch 20049 / 20050 of the production root folder. Every instance is shut down with `adb shell sync` first.
 - When the test machine also has a production root folder, set `portBase` in the test root's `mas-avd.json` (for example 21000; needs a manager with ModAVDManager#20),
-  so that its instances do not share ports with the production instances of the same number. The root folders that `upgrade` and `ime-pkg` build themselves write 22000 by default.
+  so that its instances do not share ports with the production instances of the same number. The root folders that `upgrade` and `ime-pkg` build themselves write 23000 by default.
   Every item takes the serial and the ports from `modavd info --json` instead of computing `20000 + 10 × index` itself.
 
 ## How to run

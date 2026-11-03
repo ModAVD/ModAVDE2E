@@ -35,7 +35,7 @@ param(
     # 以前取 AdbPort - 1（20082）正是 8 号的 gRPC 端口
     [int]$ScriptAdbPort = $AdbPort + 1,
     # 这个根目录的端口段（mas-avd.json 的 portBase），实例就不和同机生产根目录的同编号实例抢端口；0 = 不写，用 20000 段
-    [int]$PortBase = 22000,
+    [int]$PortBase = 23000,
     [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
