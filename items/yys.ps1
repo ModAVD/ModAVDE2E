@@ -223,6 +223,9 @@ try {
         # 设置、认出「设置」再关掉，停在庭院才算成功（10-30 13:02 实测）。它自己不会停，靠 --deadline 收住。游戏已经
         # 拉起来了，它的 StartApp（monkey）只是切到前台；包名只给 com.netease.onmyoji，不带资源包里写的活动名。
         # 任务失败后重启游戏=No 只是照任务默认选项写明，这条链用不到重启节点。
+        # 「进入游戏」按钮上有粒子动画，MaaYYs 的文字识别（启动游戏1，要「进入游戏|点击屏幕进入游戏」）多半读成「进游戏」
+        # 「进人游戏」「进心游戏」，读不对就不点、一直点左上角（11-03 冷启动 5 轮里 2 轮 180 秒都没点进去，读了一百二三十次
+        # 没一次对）。放宽成「进」和「游戏」中间随便几个字。
         Say "到登录页 $toLogin 秒，交给 MaaYYs「打开游戏」点「进入游戏」"
         New-Item -ItemType Directory -Force $Out | Out-Null
         $stamp = Get-Date -Format 'HHmmss'
@@ -232,7 +235,8 @@ try {
         $argv = @('-I', '-X', 'utf8', (Join-Path $PSScriptRoot 'maayys_run.py'), '--run', $MaaRun,
             '--adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '--port', "$($cfg.adbServerPort)",
             '--address', "emulator-$(20000 + 10 * $Index)", '--task', '打开游戏', '--case', '任务失败后重启游戏=No',
-            '--set', "启动游戏.package=$pkg", '--deadline', "$OpenDeadline", '--log-dir', (Join-Path $Out "maa-open-debug-$stamp"))
+            '--set', "启动游戏.package=$pkg", '--set', '启动游戏1.expected=进.*游戏',
+            '--deadline', "$OpenDeadline", '--log-dir', (Join-Path $Out "maa-open-debug-$stamp"))
         $op = Start-Process (Get-Command python).Source -ArgumentList $argv -RedirectStandardOutput $openLog `
             -RedirectStandardError "$openLog.err" -WindowStyle Hidden -PassThru
         # --deadline 管不到连接控制器那一步，外面再兜一层
