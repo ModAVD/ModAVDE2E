@@ -19,7 +19,7 @@ param(
     [int]$LoginWaitSec = 420,
     # 没认出登录页时把最后一张截图留在这里；默认 <TempRoot>\regress-yys
     [string]$Out,
-    # 测试根的 0 号和生产根目录的 0 号用同一组端口：生产在用就等它关掉
+    # 测试根没在 mas-avd.json 里设 portBase 时，它的 0 号和生产根目录的 0 号用同一组端口：生产在用就等它关掉
     [int]$PortWaitMin = 180,
     # >0：开机前等同机没有别的模拟器（雷电、MuMu、别的根目录的 qemu）再测，最多这么多分钟；帧率判据只在这时有意义
     [int]$QuietWaitMin = 0,
@@ -61,7 +61,7 @@ $pkg = 'com.netease.onmyoji'
 function Screen([string]$keep) {
     $png = if ($keep) { $keep } else { Join-Path ([IO.Path]::GetTempPath()) "regress-yys-$PID.png" }
     $cfg = Get-RootConfig $Root
-    cmd /c "`"$(Join-Path $cfg.sdkRoot 'platform-tools\adb.exe')`" -P $($cfg.adbServerPort) -s emulator-$(20000 + 10 * $Index) exec-out screencap -p > `"$png`""
+    cmd /c "`"$(Join-Path $cfg.sdkRoot 'platform-tools\adb.exe')`" -P $($cfg.adbServerPort) -s $serial exec-out screencap -p > `"$png`""
     try {
         $b = [System.Drawing.Bitmap]::FromFile($png)
         try {
@@ -92,7 +92,7 @@ function OnLogin { (Screen) -eq 'login' }
 function OtherEmulators {
     @(Get-Process dnplayer, Ld9BoxHeadless, MuMuPlayer, MuMuVMMHeadless, HD-Player -ErrorAction SilentlyContinue).Count +
     # 自己这台的 qemu 命令行里没有根目录路径，按控制台端口排除
-    @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" | Where-Object { $_.CommandLine -notmatch "-ports\s+$(20000 + 10 * $Index)," }).Count
+    @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" | Where-Object { $_.CommandLine -notmatch "-ports\s+$port," }).Count
 }
 
 function GamePid {
@@ -155,10 +155,12 @@ function SpanFrames($lines, [double]$a, [double]$b) {
 $old = Set-RootSdk $Root $Sdk
 $problems = @(); $notes = @()
 try {
-    Say "测试根 $Root 换到 $Sdk（原来 $old），开实例 $Index"
-    $port = 20000 + 10 * $Index; $tw = Get-Date; $said = $false
+    # 下面的截图、MaaYYs 连接、数别的模拟器都用这两个
+    $ports = Get-InstancePorts $Index; $serial = $ports.Serial; $port = $ports.Console
+    Say "测试根 $Root 换到 $Sdk（原来 $old），开实例 $Index（控制台端口 $port）"
+    $tw = Get-Date; $said = $false
     while (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
-        if (-not $said) { Say "控制台端口 $port 被占着（多半是生产的同编号实例），等它空出来，最多 $PortWaitMin 分钟"; $said = $true }
+        if (-not $said) { Say "控制台端口 $port 被占着（多半是生产根目录的同编号实例：测试根没设 portBase），等它空出来，最多 $PortWaitMin 分钟"; $said = $true }
         if (((Get-Date) - $tw).TotalMinutes -ge $PortWaitMin) { throw "端口 $port 等了 $PortWaitMin 分钟还被占着" }
         Start-Sleep 60
     }
@@ -213,7 +215,7 @@ try {
             New-Item -ItemType Directory -Force $Out | Out-Null
             $shot = Join-Path $Out "no-login-$(Get-Date -Format 'HHmmss').png"
             $cfg = Get-RootConfig $Root
-            cmd /c "`"$(Join-Path $cfg.sdkRoot 'platform-tools\adb.exe')`" -P $($cfg.adbServerPort) -s emulator-$(20000 + 10 * $Index) exec-out screencap -p > `"$shot`""
+            cmd /c "`"$(Join-Path $cfg.sdkRoot 'platform-tools\adb.exe')`" -P $($cfg.adbServerPort) -s $serial exec-out screencap -p > `"$shot`""
             $problems += "$LoginWaitSec 秒内没到登录页（最后的画面 $shot）"
             break
         }
@@ -231,7 +233,7 @@ try {
         $openLog = Join-Path $Out "maa-open-$stamp.txt"
         $argv = @('-I', '-X', 'utf8', (Join-Path $PSScriptRoot 'maayys_run.py'), '--run', $MaaRun,
             '--adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '--port', "$($cfg.adbServerPort)",
-            '--address', "emulator-$(20000 + 10 * $Index)", '--task', '打开游戏', '--case', '任务失败后重启游戏=No',
+            '--address', $serial, '--task', '打开游戏', '--case', '任务失败后重启游戏=No',
             '--set', "启动游戏.package=$pkg", '--deadline', "$OpenDeadline", '--log-dir', (Join-Path $Out "maa-open-debug-$stamp"))
         $op = Start-Process (Get-Command python).Source -ArgumentList $argv -RedirectStandardOutput $openLog `
             -RedirectStandardError "$openLog.err" -WindowStyle Hidden -PassThru
@@ -278,7 +280,7 @@ try {
             $maaDebug = Join-Path $Out "maa-debug-$stamp"
             $argv = @('-I', '-X', 'utf8', (Join-Path $PSScriptRoot 'maayys_run.py'), '--run', $MaaRun,
                 '--adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '--port', "$($cfg.adbServerPort)",
-                '--address', "emulator-$(20000 + 10 * $Index)", '--task', $MaaTask, '--deadline', "$MaaDeadline",
+                '--address', $serial, '--task', $MaaTask, '--deadline', "$MaaDeadline",
                 '--log-dir', $maaDebug) + @($MaaInput | ForEach-Object { '--input'; $_ }) + @($MaaCase | ForEach-Object { '--case'; $_ })
             if ($busy) {
                 $HitchMaxMs = $BusyHitchMaxMs

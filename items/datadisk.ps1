@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory)][string]$Sdk,
     # 测试用的 ModAVD 根目录（本机配置 TestRoot）
     [string]$Root,
-    # 生产用 0、1 号；5 号的端口和脚本用的 adb server（20050）撞，modavd 不让用
+    # 测试根没设 portBase 时，别用同机生产根目录在用的编号（同号同端口）；5 号 modavd 不让用
     [int]$Index = 3,
     [switch]$Keep
 )
