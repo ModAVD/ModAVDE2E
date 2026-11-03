@@ -20,6 +20,7 @@ and the bundled scripts in `package/` and the bridge in `bridge/` of the ModAVD 
   There is no account information in the code; the test accounts exist only in the local test instances. **Please judge for yourself whether running games with an emulator and scripts complies with the game's terms of use.**
 - **Use newly created test instances logged in with test accounts.** Do not run on an instance logged in with your main account: several items create instances, delete instances and force-stop the game.
 - adb uses only private ports. It does not touch 5037, and it does not touch 20049 / 20050 of the production root folder. Every instance is shut down with `adb shell sync` first.
+- Problems and suggestions go to the [Issues](https://github.com/ModAVD/ModAVD/issues) of the ModAVD repository; pick "Pre-release regression". This repository only takes PRs.
 
 ## How to run
 
