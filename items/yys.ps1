@@ -2,10 +2,13 @@
 # 脚本自己只拉起游戏、点游戏自己的引擎更新框；登录页由脚本读像素认（左下角「8+」适龄角标），不经过模型看图。
 # 点「进入游戏」交给 MaaYYs 自己的「打开游戏」任务（维护者 10-30 定）。帧只算游戏主进程（父进程是 zygote64）的
 # app_time_stats，系统界面的表面不算。
-# 通过：桥加载（shim-ctor OK）、有 zram 交换区、到了登录页、游戏进程没有 Fatal signal、每个窗口帧率 ≥ MinFps 且没有超过 1 秒的帧。
-# 给了 -MaaTask 就接着用 MaaYYs 真打（maayys_run.py，例如自动御魂壹层 3 场），按 MaaYYs 日志把每场战斗切出来单独判帧率；
-# 战斗以外（走菜单、进出战斗读条）只记帧率、限最慢一帧。菜单慢、读条卡 1 秒上下是游戏主线程在 arm64 转译下算不过来
-# （10-30 实测：主线程用户态满载、客体其余 CPU 七成空闲、宿主渲染线程两三成），不是图形或磁盘。
+# 通过：桥加载（shim-ctor OK）、有 zram 交换区、到了登录页、游戏进程没有 Fatal signal、庭院没有超过 1 秒的帧，
+# 庭院帧率不低于上一个生产版的基准（baselines\fps.json 的 yys-courtyard）超过容差。
+# 给了 -MaaTask 就接着用 MaaYYs 真打（maayys_run.py，例如自动御魂壹层 3 场），按 MaaYYs 日志把每场战斗切出来单独判帧率
+# （和 yys-battle 比）；战斗以外（走菜单、进出战斗读条）只记帧率、限最慢一帧。菜单慢、读条卡 1 秒上下是游戏主线程在 arm64
+# 转译下算不过来（10-30 实测：主线程用户态满载、客体其余 CPU 七成空闲、宿主渲染线程两三成），不是图形或磁盘。
+# 帧率和基准比的规矩同 game-real.ps1（items\fps-baseline.ps1）：同机别的模拟器多、睿频条件比基准差或判不出时只记录。
+# -MinFps、-BattleFps 是不看基准的兜底，只拦明显坏掉的情况。
 param(
     [Parameter(Mandatory)][string]$Sdk,
     # 测试用的 ModAVD 根目录，0 号已装桥、已登录（本机配置 TestRoot）
@@ -13,7 +16,10 @@ param(
     [int]$Index = 0,
     [int]$Windows = 2,
     [int]$Seconds = 30,
+    # 庭院每个窗口的兜底下限（睿频关时庭院 53–55 fps，开着时 60）
     [double]$MinFps = 45,
+    # 上一个生产版的帧率基准：庭院 yys-courtyard、每场战斗 yys-battle
+    [string]$FpsBaseline = (Join-Path $PSScriptRoot '..\baselines\fps.json'),
     # 正常 150–170 秒到登录页。10-29 曾经约五分之一卡死在「正在获取音频列表...」，那不是网络慢，是转译层的
     # fork 死锁（伴生库已修）；再卡就该判失败，不放宽等待去掩盖
     [int]$LoginWaitSec = 420,
@@ -34,11 +40,13 @@ param(
     [int]$MaaDeadline = 900,
     # MaaYYs「打开游戏」（从登录页点「进入游戏」到认出庭院）的时限
     [int]$OpenDeadline = 180,
-    # 每场战斗（开打 3 秒后到结算前 3 秒）的帧率下限；战斗段里不许有超过 1 秒的帧
-    [double]$BattleFps = 55,
+    # 每场战斗（开打 3 秒后到结算前 3 秒）的兜底下限；战斗段里不许有超过 1 秒的帧。原来是 55：0.36.0 睿频开着时打出来
+    # 56–57 fps，11-02 晚上关了睿频以后 0.36.0、0.37.0 都只有 53–55，固定的 55 两版都过不了，所以改成和基准比、这里只兜底
+    [double]$BattleFps = 45,
     # 战斗以外（MaaYYs 走菜单、进出战斗读条）最慢一帧的上限：读条时主线程要算 1 秒上下（10-30 实测 0.9–1.3 秒）
     [double]$HitchMaxMs = 2000,
-    # 同机别的模拟器进程多于这个数时，庭院和战斗的帧率只记录、不判，读条上限放宽到 $BusyHitchMaxMs。
+    # 同机别的模拟器进程多于这个数时，帧率只记录、不判，读条上限放宽到 $BusyHitchMaxMs。庭院、每场战斗、战斗以外各按
+    # 自己那段时间里数到的最多的算（每个测帧窗口前后各数一次）。
     # 10-30 同机三台雷电挂机时，同样的战斗每帧多花约 60% 的宿主 CPU 时间（全核负载下降频、超线程共用核心），
     # 庭院 60→50、战斗 57→50 fps、读条最长 2.2 秒
     [int]$BusyOthers = 2,
@@ -47,6 +55,7 @@ param(
 $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
+. "$PSScriptRoot\fps-baseline.ps1"
 $Root = Use-Local TestRoot $Root '-Root'
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') 'regress-yys' }
 $MaaRun = Use-Local MaaYYs $MaaRun '-MaaRun'
@@ -100,18 +109,30 @@ function GamePid {
 }
 
 function Frames([string]$gp) {
+    # 第几个窗口记进每一行，SpanFrames 不跨窗口配对
+    $script:FrameWin = [int]$script:FrameWin + 1
     # 只清、只读 main（app_time_stats 在这里）：crash 缓冲留着给最后查 Fatal signal
     A logcat -b main -c | Out-Null
-    Start-Sleep -Seconds $Seconds
+    $t0 = Get-Date; $a = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
+    # 同机别的模拟器、处理器性能在窗口里看两次：开头一次、离结束 2 秒时一次（一次约 0.45 秒）。放在窗口外面的话，两个窗口
+    # 之间要多空出近 1 秒。A、B 是窗口起止的 Unix 秒，拿来和每场战斗的时间段对
+    $others = OtherEmulators; $perf = Get-CpuPerf
+    $left = $Seconds - 2 - ((Get-Date) - $t0).TotalSeconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]($left * 1000)) }
+    $others = [math]::Max($others, (OtherEmulators)); $perf = Get-PerfMax $perf (Get-CpuPerf)
+    $left = $Seconds - ((Get-Date) - $t0).TotalSeconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]($left * 1000)) }
     # 每行大约管 1 秒（到上一行为止）；-v epoch 给的是客体的 Unix 时间，战斗测帧拿它和 MaaYYs 日志对时间段
     $stats = (A logcat -d -b main -v epoch) | Select-String "^\s*([\d.]+)\s+$gp\s+\d+\s.*app_time_stats: avg=([\d.]+)ms min=([\d.]+)ms max=([\d.]+)ms count=(\d+)"
+    $b = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
     $frames = 0; $ms = 0.0; $worst = 0.0; $long = 0; $lines = @()
     foreach ($m in $stats) {
         $g = $m.Matches[0].Groups; $c = [int]$g[5].Value; $frames += $c; $ms += [double]$g[2].Value * $c; $mx = [double]$g[4].Value
         if ($mx -gt 1000) { $long++ }; if ($mx -gt $worst) { $worst = $mx }
-        $lines += [pscustomobject]@{ T = [double]$g[1].Value; N = $c; Max = $mx }
+        $lines += [pscustomobject]@{ T = [double]$g[1].Value; N = $c; Max = $mx; W = $script:FrameWin }
     }
-    [pscustomobject]@{ Fps = $frames / $Seconds; Avg = $(if ($frames) { $ms / $frames } else { 0 }); Worst = $worst; Long = $long; Lines = $lines }
+    [pscustomobject]@{ Fps = $frames / $Seconds; Avg = $(if ($frames) { $ms / $frames } else { 0 }); Worst = $worst; Long = $long; Lines = $lines
+        Others = $others; Perf = $perf; A = $a; B = $b }
 }
 
 # 游戏进程常驻内存、整机交换区用量和可用内存（MB）；进程不在了返回空
@@ -138,18 +159,20 @@ function FightSpans([string]$mlog) {
     $spans
 }
 
-# 一段时间内的帧率和最慢一帧：只算整段落在里面的统计行（每行管到上一行为止）
+# 一段时间内的帧率和最慢一帧：只算整段落在里面的统计行（每行管到上一行为止）。帧率只拿同一个窗口里相邻的两行算：两个窗口
+# 之间（读日志、清日志）打出来的统计行被下一次 logcat -c 清掉了，跨窗口配对会把这段时间算进去、帧算不进去，帧率偏低。
+# 最慢一帧照旧每行都看。Sec 是真正算进帧率的秒数
 function SpanFrames($lines, [double]$a, [double]$b) {
-    $n = 0; $worst = 0.0; $t0 = $null; $t1 = $null; $prev = $null
+    $n = 0; $sec = 0.0; $worst = 0.0; $prev = $null
     foreach ($l in $lines) {
         if ($prev -and $prev.T -ge $a -and $l.T -le $b) {
-            if ($null -eq $t0) { $t0 = $prev.T }
-            $n += $l.N; $t1 = $l.T; if ($l.Max -gt $worst) { $worst = $l.Max }
+            if ($l.Max -gt $worst) { $worst = $l.Max }
+            if ($l.W -eq $prev.W) { $n += $l.N; $sec += $l.T - $prev.T }
         }
         $prev = $l
     }
-    if ($null -eq $t0 -or $t1 -le $t0) { return $null }
-    [pscustomobject]@{ Fps = $n / ($t1 - $t0); Worst = $worst; Sec = $t1 - $t0 }
+    if ($sec -le 0) { return $null }
+    [pscustomobject]@{ Fps = $n / $sec; Worst = $worst; Sec = $sec }
 }
 
 $old = Set-RootSdk $Root $Sdk
@@ -261,19 +284,31 @@ try {
     }
     if ($entered) {
         $gp = GamePid
-        # 帧率很受同机别的模拟器影响（10-29：生产两台雷电挂机时 39–47 fps，空闲时 59–60 fps），记下来对着看
-        $others = OtherEmulators
-        $busy = $others -gt $BusyOthers
-        $notes += "同机别的模拟器进程 $others 个$(if ($busy) { '，帧率只记录不判' })"
+        # 帧率很受同机别的模拟器影响（10-29：生产两台雷电挂机时 39–47 fps，空闲时 59–60 fps）。每个窗口前后都数，庭院、
+        # 每场战斗各按自己那段时间算：11-03 有一轮进游戏时数到 0 个，一分钟后生产的雷电起来了，三场战斗都打在它旁边。
+        $base = Read-FpsBaseline $FpsBaseline
+        $perf = $null
         if ($gp -notmatch '^\d+$') { $problems += '进游戏后找不到游戏主进程' }
         else {
+            $cw = @()
             for ($w = 1; $w -le $Windows; $w++) {
                 $f = Frames $gp
-                Say ("窗口 {0}：{1:N1} fps，平均 {2:N1} ms，最慢 {3:N0} ms，超过 1 秒 {4} 次" -f $w, $f.Fps, $f.Avg, $f.Worst, $f.Long)
+                $cw += $f
+                Say ("窗口 {0}：{1:N1} fps，平均 {2:N1} ms，最慢 {3:N0} ms，超过 1 秒 {4} 次，同机别的模拟器 {5} 个" -f $w, $f.Fps, $f.Avg, $f.Worst, $f.Long, $f.Others)
                 $notes += ("{0:N1} fps / 平均 {1:N1} ms / 最慢 {2:N0} ms" -f $f.Fps, $f.Avg, $f.Worst)
-                if ($f.Fps -lt $MinFps -and -not $busy) { $problems += ("窗口 {0} 只有 {1:N1} fps" -f $w, $f.Fps) }
                 if ($f.Long) { $problems += "窗口 $w 有 $($f.Long) 次超过 1 秒的帧" }
             }
+            $others = ($cw | Measure-Object Others -Maximum).Maximum
+            foreach ($f in $cw) { $perf = Get-PerfMax $perf $f.Perf }
+            $busy = $others -gt $BusyOthers
+            $notes += "庭院测帧时同机别的模拟器进程最多 $others 个，$(Format-FpsCondition $perf)"
+            if (-not $busy) {
+                $w = 0
+                foreach ($f in $cw) { $w++; if ($f.Fps -lt $MinFps) { $problems += ("窗口 {0} 只有 {1:N1} fps（兜底要 ≥ {2}）" -f $w, $f.Fps, $MinFps) } }
+            }
+            $c = Compare-FpsBaseline $base 'yys-courtyard' ($cw | Measure-Object Fps -Average).Average '庭院' (Get-FpsCondition $perf) $(if ($busy) { "同机别的模拟器多于 $BusyOthers 个" } else { '' })
+            $notes += $c.Note
+            if ($c.Problem) { $problems += $c.Problem }
         }
         if ($MaaTask -and $gp -match '^\d+$') {
             $cfg = Get-RootConfig $Root
@@ -284,10 +319,6 @@ try {
                 '--adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '--port', "$($cfg.adbServerPort)",
                 '--address', "emulator-$(20000 + 10 * $Index)", '--task', $MaaTask, '--deadline', "$MaaDeadline",
                 '--log-dir', $maaDebug) + @($MaaInput | ForEach-Object { '--input'; $_ }) + @($MaaCase | ForEach-Object { '--case'; $_ })
-            if ($busy) {
-                $HitchMaxMs = $BusyHitchMaxMs
-                $notes += "宿主忙，战斗帧率只记录，读条 ≤ $HitchMaxMs ms"
-            }
             $mem0 = GameMem $gp
             Say "MaaYYs 跑「$MaaTask」：$($MaaInput -join ' ')"
             $mp = Start-Process (Get-Command python).Source -ArgumentList $argv -RedirectStandardOutput $maaLog `
@@ -309,22 +340,43 @@ try {
             $mlog = Join-Path $maaDebug 'maafw.log'
             $spans = @(if (Test-Path -LiteralPath $mlog) { FightSpans $mlog })
             $all = @($bw | ForEach-Object { $_.Lines } | Sort-Object T)
+            foreach ($f in $bw) { $perf = Get-PerfMax $perf $f.Perf }
+            $cond = Get-FpsCondition $perf
             $notes += "MaaYYs 打完 $($spans.Count) 场"
             if ($spans.Count -lt 1) { $problems += 'MaaYYs 一场战斗都没打完，战斗帧率不算数' }
-            $k = 0
+            $k = 0; $cmp = @()
             foreach ($s in $spans) {
                 $k++
                 $sf = SpanFrames $all ($s.A + 3) ($s.B - 3)
                 if (-not $sf) { $problems += "第 $k 场没测到帧"; continue }
-                $notes += ("第 {0} 场 {1:N1} fps、最慢 {2:N0} ms（{3:N0} 秒）" -f $k, $sf.Fps, $sf.Worst, $sf.Sec)
-                if ($sf.Fps -lt $BattleFps -and -not $busy) { $problems += ("第 {0} 场只有 {1:N1} fps（要 ≥ {2}）" -f $k, $sf.Fps, $BattleFps) }
+                # 这一场同机别的模拟器最多几个：和这一场时间段有重叠的窗口前后数到的
+                $so = [int](@($bw | Where-Object { $_.B -gt $s.A -and $_.A -lt $s.B } | ForEach-Object { $_.Others }) | Measure-Object -Maximum).Maximum
+                $sBusy = $so -gt $BusyOthers
+                $notes += ("第 {0} 场 {1:N1} fps、最慢 {2:N0} ms（{3:N0} 秒，同机别的模拟器 {4} 个）" -f $k, $sf.Fps, $sf.Worst, $sf.Sec, $so)
+                if ($sf.Fps -lt $BattleFps -and -not $sBusy) { $problems += ("第 {0} 场只有 {1:N1} fps（兜底要 ≥ {2}）" -f $k, $sf.Fps, $BattleFps) }
                 if ($sf.Worst -gt 1000) { $problems += ("第 {0} 场有一帧 {1:N0} ms" -f $k, $sf.Worst) }
+                $c = Compare-FpsBaseline $base 'yys-battle' $sf.Fps "第 $k 场" $cond $(if ($sBusy) { "同机别的模拟器多于 $BusyOthers 个" } else { '' })
+                $cmp += $c
+                if ($c.Problem) { $problems += $c.Problem }
             }
-            # 战斗以外：只记帧率；最慢一帧（进出战斗的读条）不许超过 $HitchMaxMs
+            # 每场和基准比的结果合成一句：每场和上一版（0.37.0，睿频关）54.1比：101 % / 99 % / 101 %（容差 5 %）
+            if ($cmp -and -not $cmp[0].Ref) { $notes += "没有 yys-battle 的基准，战斗帧率只记录" }
+            elseif ($cmp) {
+                $parts = $cmp | ForEach-Object { '{0:P0}{1}' -f $_.Ratio, $(if ($_.Skip) { "（$($_.Skip)，只记录）" }) }
+                $notes += ('每场和{0}比：{1}（容差 {2:P0}）' -f $cmp[0].Ref, ($parts -join ' / '), $cmp[0].Tol)
+            }
+            # 战斗以外：只记帧率；最慢一帧（进出战斗的读条）不许超过 $HitchMaxMs，MaaYYs 跑着时同机别的模拟器多就放宽
+            $mo = ($bw | Measure-Object Others -Maximum).Maximum
+            if ($mo -gt $BusyOthers) {
+                $HitchMaxMs = $BusyHitchMaxMs
+                $notes += "MaaYYs 跑着时同机别的模拟器最多 $mo 个，读条放宽到 ≤ $HitchMaxMs ms"
+            }
             $n = 0; $sec = 0.0; $worst = 0.0; $prev = $null
             foreach ($l in $all) {
                 if ($prev -and -not @($spans | Where-Object { $l.T -gt $_.A -and $prev.T -lt $_.B }).Count) {
-                    $n += $l.N; $sec += $l.T - $prev.T; if ($l.Max -gt $worst) { $worst = $l.Max }
+                    if ($l.Max -gt $worst) { $worst = $l.Max }
+                    # 同 SpanFrames：帧率不跨窗口配对
+                    if ($l.W -eq $prev.W) { $n += $l.N; $sec += $l.T - $prev.T }
                 }
                 $prev = $l
             }
