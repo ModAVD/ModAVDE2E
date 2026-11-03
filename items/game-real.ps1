@@ -12,7 +12,8 @@
 # 驱动跑 -Minutes 分钟 → 先 sync 再关机。装桥那轮跑完不卸桥：测试实例和用户的一样一直带着桥。
 # 判过：驱动成功；游戏不重启；无 native crash / ANR / vkerr / devlost / fatal、无新崩溃转储；装桥那轮桥在，
 # 走转译层的游戏（arm64）日志里有撤回那一行；装桥那轮帧率中位数不低于上一个生产版的基准（-FpsBaseline）超过容差。
-# 同机别的模拟器多于 2 个时帧率只记录、不判（宿主忙时测的数不能和基准比）。
+# 同机别的模拟器多于 2 个时帧率只记录、不判（宿主忙时测的数不能和基准比）；睿频条件比基准差或判不出时也只记录
+# （items\fps-baseline.ps1）。
 param(
     [Parameter(Mandatory)][ValidateSet('ark', 'r1999', 'sr', 'ef')][string]$Game,
     [string]$Rounds = 'on',
@@ -34,6 +35,7 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 if ($AdbPort -in 5037, 20049, 20050) { throw "adb 端口 $AdbPort 是生产在用的" }
 . (Join-Path $PSScriptRoot '..\local.ps1')
+. (Join-Path $PSScriptRoot 'fps-baseline.ps1')
 # 这一项真跑时要的仓库外的东西（-ReJudge 只重新判，都不要）；没配就在这里停
 $need = if ($ReJudge) { @() } else {
     @('Launcher', 'Monitor', 'VulkanFixLib', 'PackageScripts') + @{ ark = @('Kit', 'GameAvdHome'); r1999 = @('Kit', 'GameAvdHome')
@@ -309,15 +311,18 @@ try {
                 -RedirectStandardOutput (Join-Path $rd 'mon.txt') -RedirectStandardError (Join-Path $rd 'mon.err.txt') -WindowStyle Hidden -PassThru
             $drv = StartDriver $rd
             $deadline = (Get-Date).AddMinutes($Minutes + 15)
-            $others = Others
-            while (-not $drv.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep 10; $others = [math]::Max($others, (Others)) }
+            # 同机负载和睿频：每 10 秒看一次，取最大
+            $others = Others; $perf = Get-CpuPerf
+            while (-not $drv.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep 10; $others = [math]::Max($others, (Others)); $perf = Get-PerfMax $perf (Get-CpuPerf)
+            }
             $timedOut = -not $drv.HasExited
             if ($timedOut) { KillTree $drv.Id }
             $code = if ($timedOut) { -1 } else { $drv.ExitCode }
             Start-Sleep 35   # 让采样再记一行
             KillTree $mon.Id
             $facts = [pscustomobject]@{ code = $code; timedOut = $timedOut; alive = (@(Qemu | Where-Object { $_.ProcessId -eq $qemu0 }).Count -gt 0)
-                newDumps = (Dumps) - $dump0; abi = $abi; nativeBridge = $nb; glTransport = $gt; uninstall = $null; others = $others }
+                newDumps = (Dumps) - $dump0; abi = $abi; nativeBridge = $nb; glTransport = $gt; uninstall = $null; others = $others; perf = $perf }
             Stop
             $facts | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $rd 'round.json') -Encoding utf8
         }
@@ -326,7 +331,7 @@ try {
         $notes += $j.Line
         $problems += $j.Problems
         if ($j.Fps -gt 0) { $fpsBy[$round] = $j.Fps }
-        if ($round -eq 'on') { $othersOn = $facts.others }
+        if ($round -eq 'on') { $othersOn = $facts.others; $perfOn = $facts.perf }
     }
     # 两轮都跑时（排查用）只记录装桥 / 不装桥之比，不判
     if ($fpsBy.ContainsKey('off') -and $fpsBy.ContainsKey('on') -and $fpsBy['off'] -gt 0) {
@@ -334,17 +339,13 @@ try {
     }
     # 装桥那轮和上一个生产版的基准比
     if ($fpsBy.ContainsKey('on')) {
-        $base = if (Test-Path -LiteralPath $FpsBaseline) { (Get-Content -LiteralPath $FpsBaseline -Raw -Encoding utf8 | ConvertFrom-Json) } else { $null }
-        $b = if ($base) { $base.games.$Game } else { $null }
-        if (-not $b) { $notes += "没有 $Game 的帧率基准（$FpsBaseline），只记录" }
+        $base = Read-FpsBaseline $FpsBaseline
+        if (-not ($base -and $base.games.$Game)) { $notes += "没有 $Game 的帧率基准（$FpsBaseline），只记录" }
         else {
-            $tol = if ($null -ne $b.tol) { [double]$b.tol } else { $FpsDropMax }
-            $ratio = $fpsBy['on'] / [double]$b.fps
-            $cmp = "帧率 {0:N1}，上一版（{1}）{2:N1}（{3:P0}，容差 {4:P0}）" -f $fpsBy['on'], $base.version, [double]$b.fps, $ratio, $tol
-            if ($null -eq $othersOn) { $notes += "$cmp；这一轮没记同机负载" }
-            elseif ([int]$othersOn -gt $BusyOthers) { $notes += "$cmp；同机别的模拟器 $othersOn 个，帧率只记录不判"; $othersOn = $null }
-            else { $notes += "$cmp；同机别的模拟器 $othersOn 个" }
-            if ($null -ne $othersOn -and $ratio -lt (1 - $tol)) { $problems += ("帧率比上一版低了 {0:P0}（容差 {1:P0}）" -f (1 - $ratio), $tol) }
+            $skip = if ($null -eq $othersOn) { '这一轮没记同机负载' } elseif ([int]$othersOn -gt $BusyOthers) { "同机别的模拟器多于 $BusyOthers 个" } else { '' }
+            $c = Compare-FpsBaseline $base $Game $fpsBy['on'] '帧率' (Get-FpsCondition $perfOn) $skip $FpsDropMax
+            $notes += "同机别的模拟器 $(if ($null -eq $othersOn) { '没记' } else { "$othersOn 个" })，$(Format-FpsCondition $perfOn)；$($c.Note)"
+            if ($c.Problem) { $problems += $c.Problem }
         }
     }
 } catch {

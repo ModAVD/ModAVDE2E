@@ -23,6 +23,7 @@ ModAVD 仓库里的随包脚本 `package/` 和执行桥 `bridge/`，所以单独
 - 测试机上同时有生产根目录时，测试根要在 `mas-avd.json` 里设 `portBase`（比如 21000，要管理器带 ModAVD/ModAVD#75），
   实例的端口就不和生产的同编号实例撞；`upgrade`、`ime-pkg` 自己搭的根目录默认写 23000。各项的 serial 和端口都从
   `modavd info --json` 取，不自己按 `20000 + 10 × 编号` 算。
+- 问题和建议到 ModAVD 仓库的 [Issues](https://github.com/ModAVD/ModAVD/issues) 提，选上「发版前回归」；本仓库只收 PR。
 
 ## 怎么跑
 
@@ -40,7 +41,9 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 `PostPackage` 列打完包要用组包目录补跑的（升级、`ime-pkg`），运行器最后按范围提示。先 `-DryRun` 看会跑哪些项、用到哪些本机配置。
 
 **游戏项帧率**：`items\game-real.ps1` 默认只跑装桥那一轮，帧率中位数和 `baselines\fps.json`（上一个生产版的数，每个游戏有容差）比；
-同机别的模拟器多于 2 个时只记录不判。每次发版回归通过后，把这一版的数写回 `fps.json`。
+`items\yys.ps1` 的庭院和每场战斗也和它比（`yys-courtyard`、`yys-battle`）。同机别的模拟器多于 2 个时只记录不判。
+基准记着测的时候睿频开没开（`condition`）：测的时候按宿主 CPU 的「处理器性能」判（超过 101 % 就是开着）。这次条件比基准差（睿频关对睿频开的基准）或者判不出时只记录不判；比基准好照判，睿频只会让帧率更高。
+每次发版回归通过后，把这一版的数和条件写回 `fps.json`。
 
 输出默认在 `<TempRoot>\regress-<构建>-<时间>\`（本机配置有 `TempRoot` 时 `-Out` 也必须在它下面）：每项的控制台 `<项>.console.txt`、
 项目自己的输出 `<项>\`、总日志 `regress.log`、`results.json` 和 `results.md`。有一项不是「通过」，退出码就是 1。
