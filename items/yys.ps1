@@ -7,7 +7,7 @@
 # 给了 -MaaTask 就接着用 MaaYYs 真打（maayys_run.py，例如自动御魂壹层 3 场），按 MaaYYs 日志把每场战斗切出来单独判帧率
 # （和 yys-battle 比）；战斗以外（走菜单、进出战斗读条）只记帧率、限最慢一帧。菜单慢、读条卡 1 秒上下是游戏主线程在 arm64
 # 转译下算不过来（10-30 实测：主线程用户态满载、客体其余 CPU 七成空闲、宿主渲染线程两三成），不是图形或磁盘。
-# 帧率和基准比的规矩同 game-real.ps1（items\fps-baseline.ps1）：同机别的模拟器多、睿频开没开和基准不一样时只记录。
+# 帧率和基准比的规矩同 game-real.ps1（items\fps-baseline.ps1）：同机别的模拟器多、睿频条件比基准差或判不出时只记录。
 # -MinFps、-BattleFps 是不看基准的兜底，只拦明显坏掉的情况。
 param(
     [Parameter(Mandatory)][string]$Sdk,
@@ -109,22 +109,28 @@ function GamePid {
 }
 
 function Frames([string]$gp) {
-    # 窗口前后各数一次同机别的模拟器、读一次处理器性能（都在测帧的时间外面）；A、B 是窗口起止的 Unix 秒，
-    # 拿来和每场战斗的时间段对
-    $others = OtherEmulators; $perf = Get-CpuPerf; $a = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
+    # 第几个窗口记进每一行，SpanFrames 不跨窗口配对
+    $script:FrameWin = [int]$script:FrameWin + 1
     # 只清、只读 main（app_time_stats 在这里）：crash 缓冲留着给最后查 Fatal signal
     A logcat -b main -c | Out-Null
-    Start-Sleep -Seconds $Seconds
+    $t0 = Get-Date; $a = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
+    # 同机别的模拟器、处理器性能在窗口里看两次：开头一次、离结束 2 秒时一次（一次约 0.45 秒）。放在窗口外面的话，两个窗口
+    # 之间要多空出近 1 秒。A、B 是窗口起止的 Unix 秒，拿来和每场战斗的时间段对
+    $others = OtherEmulators; $perf = Get-CpuPerf
+    $left = $Seconds - 2 - ((Get-Date) - $t0).TotalSeconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]($left * 1000)) }
+    $others = [math]::Max($others, (OtherEmulators)); $perf = Get-PerfMax $perf (Get-CpuPerf)
+    $left = $Seconds - ((Get-Date) - $t0).TotalSeconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]($left * 1000)) }
     # 每行大约管 1 秒（到上一行为止）；-v epoch 给的是客体的 Unix 时间，战斗测帧拿它和 MaaYYs 日志对时间段
     $stats = (A logcat -d -b main -v epoch) | Select-String "^\s*([\d.]+)\s+$gp\s+\d+\s.*app_time_stats: avg=([\d.]+)ms min=([\d.]+)ms max=([\d.]+)ms count=(\d+)"
+    $b = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
     $frames = 0; $ms = 0.0; $worst = 0.0; $long = 0; $lines = @()
     foreach ($m in $stats) {
         $g = $m.Matches[0].Groups; $c = [int]$g[5].Value; $frames += $c; $ms += [double]$g[2].Value * $c; $mx = [double]$g[4].Value
         if ($mx -gt 1000) { $long++ }; if ($mx -gt $worst) { $worst = $mx }
-        $lines += [pscustomobject]@{ T = [double]$g[1].Value; N = $c; Max = $mx }
+        $lines += [pscustomobject]@{ T = [double]$g[1].Value; N = $c; Max = $mx; W = $script:FrameWin }
     }
-    $b = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() / 1000.0
-    $others = [math]::Max($others, (OtherEmulators)); $perf = Get-PerfMax $perf (Get-CpuPerf)
     [pscustomobject]@{ Fps = $frames / $Seconds; Avg = $(if ($frames) { $ms / $frames } else { 0 }); Worst = $worst; Long = $long; Lines = $lines
         Others = $others; Perf = $perf; A = $a; B = $b }
 }
@@ -153,18 +159,20 @@ function FightSpans([string]$mlog) {
     $spans
 }
 
-# 一段时间内的帧率和最慢一帧：只算整段落在里面的统计行（每行管到上一行为止）
+# 一段时间内的帧率和最慢一帧：只算整段落在里面的统计行（每行管到上一行为止）。帧率只拿同一个窗口里相邻的两行算：两个窗口
+# 之间（读日志、清日志）打出来的统计行被下一次 logcat -c 清掉了，跨窗口配对会把这段时间算进去、帧算不进去，帧率偏低。
+# 最慢一帧照旧每行都看。Sec 是真正算进帧率的秒数
 function SpanFrames($lines, [double]$a, [double]$b) {
-    $n = 0; $worst = 0.0; $t0 = $null; $t1 = $null; $prev = $null
+    $n = 0; $sec = 0.0; $worst = 0.0; $prev = $null
     foreach ($l in $lines) {
         if ($prev -and $prev.T -ge $a -and $l.T -le $b) {
-            if ($null -eq $t0) { $t0 = $prev.T }
-            $n += $l.N; $t1 = $l.T; if ($l.Max -gt $worst) { $worst = $l.Max }
+            if ($l.Max -gt $worst) { $worst = $l.Max }
+            if ($l.W -eq $prev.W) { $n += $l.N; $sec += $l.T - $prev.T }
         }
         $prev = $l
     }
-    if ($null -eq $t0 -or $t1 -le $t0) { return $null }
-    [pscustomobject]@{ Fps = $n / ($t1 - $t0); Worst = $worst; Sec = $t1 - $t0 }
+    if ($sec -le 0) { return $null }
+    [pscustomobject]@{ Fps = $n / $sec; Worst = $worst; Sec = $sec }
 }
 
 $old = Set-RootSdk $Root $Sdk
@@ -362,7 +370,9 @@ try {
             $n = 0; $sec = 0.0; $worst = 0.0; $prev = $null
             foreach ($l in $all) {
                 if ($prev -and -not @($spans | Where-Object { $l.T -gt $_.A -and $prev.T -lt $_.B }).Count) {
-                    $n += $l.N; $sec += $l.T - $prev.T; if ($l.Max -gt $worst) { $worst = $l.Max }
+                    if ($l.Max -gt $worst) { $worst = $l.Max }
+                    # 同 SpanFrames：帧率不跨窗口配对
+                    if ($l.W -eq $prev.W) { $n += $l.N; $sec += $l.T - $prev.T }
                 }
                 $prev = $l
             }

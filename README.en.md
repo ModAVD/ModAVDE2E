@@ -38,7 +38,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 
 **Frame rate of the game items**: by default `items\game-real.ps1` runs only the round with the bridge installed, and the median frame rate is compared with `baselines\fps.json` (the numbers of the previous production version, with a tolerance for each game).
 `items\yys.ps1` compares the courtyard and each battle with it too (`yys-courtyard`, `yys-battle`). When the same machine runs more than 2 other emulators, it only records the number and does not judge it.
-The baseline records whether CPU boost (turbo) was on when it was measured (`condition`: `睿频开` on, `睿频关` off). During a run this is read from the host CPU's "processor performance" counter (above 100 % means boost is on); when it differs from the baseline, the number is only recorded, not judged.
+The baseline records whether CPU boost (turbo) was on when it was measured (`condition`: `睿频开` on, `睿频关` off). During a run this is read from the host CPU's "processor performance" counter (above 101 % means boost is on). When this run's condition is worse than the baseline's (boost off against a boost-on baseline) or cannot be read, the number is only recorded, not judged; when it is better, it is judged as usual, since boost only raises the frame rate.
 After each release regression passes, write this version's numbers and condition back to `fps.json`.
 
 By default the output goes to `<TempRoot>\regress-<build>-<time>\` (when the local configuration has `TempRoot`, `-Out` must also be under it): the console output of each item `<item>.console.txt`,

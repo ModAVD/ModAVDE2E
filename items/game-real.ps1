@@ -12,7 +12,7 @@
 # 驱动跑 -Minutes 分钟 → 先 sync 再关机。装桥那轮跑完不卸桥：测试实例和用户的一样一直带着桥。
 # 判过：驱动成功；游戏不重启；无 native crash / ANR / vkerr / devlost / fatal、无新崩溃转储；装桥那轮桥在，
 # 走转译层的游戏（arm64）日志里有撤回那一行；装桥那轮帧率中位数不低于上一个生产版的基准（-FpsBaseline）超过容差。
-# 同机别的模拟器多于 2 个时帧率只记录、不判（宿主忙时测的数不能和基准比）；睿频开没开和基准记的不一样时也只记录
+# 同机别的模拟器多于 2 个时帧率只记录、不判（宿主忙时测的数不能和基准比）；睿频条件比基准差或判不出时也只记录
 # （items\fps-baseline.ps1）。
 param(
     [Parameter(Mandatory)][ValidateSet('ark', 'r1999', 'sr', 'ef')][string]$Game,
