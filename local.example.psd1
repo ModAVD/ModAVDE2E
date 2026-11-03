@@ -16,7 +16,8 @@
     OfficialSdk  = ''
 
     # ---- 测试机
-    # 测试用的 ModAVD 根目录（私有 adb 端口；0 号已装桥、登着测试号，其余编号由各项临时建、跑完删）
+    # 测试用的 ModAVD 根目录（私有 adb 端口，同机有生产根目录时 mas-avd.json 设 portBase；0 号已装桥、登着测试号，
+    # 其余编号由各项临时建、跑完删）
     TestRoot     = ''
     # 游戏实例 mas_6 / mas_7 / endfield、星铁实例 gfx_t2、输入法冒烟机 imesmoke 的 ANDROID_AVD_HOME
     GameAvdHome  = ''

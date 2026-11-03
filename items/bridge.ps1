@@ -26,7 +26,7 @@ function Bridge([string]$action, [switch]$Reboot) {
     $cfg = Get-RootConfig $Root
     # 不传 -AdbPort：脚本自己从测试根的 mas-avd.json 读，和用户照「怎么更新」敲命令时一样
     $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Resolve-Path $BridgeScript).Path, $action, '-Root', $Root,
-        '-Adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '-Payload', $payload, '-Serial', "emulator-$(20000 + 10 * $Index)")
+        '-Adb', (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe'), '-Payload', $payload, '-Serial', (Get-InstancePorts $Index).Serial)
     if ($Reboot) { $argv += '-Reboot' }
     $out = & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @argv 2>&1 | ForEach-Object { "$_" }
     $code = $LASTEXITCODE

@@ -20,6 +20,9 @@ and the bundled scripts in `package/` and the bridge in `bridge/` of the ModAVD 
   There is no account information in the code; the test accounts exist only in the local test instances. **Please judge for yourself whether running games with an emulator and scripts complies with the game's terms of use.**
 - **Use newly created test instances logged in with test accounts.** Do not run on an instance logged in with your main account: several items create instances, delete instances and force-stop the game.
 - adb uses only private ports. It does not touch 5037, and it does not touch 20049 / 20050 of the production root folder. Every instance is shut down with `adb shell sync` first.
+- When the test machine also has a production root folder, set `portBase` in the test root's `mas-avd.json` (for example 21000; needs a manager with ModAVD/ModAVD#75),
+  so that its instances do not share ports with the production instances of the same number. The root folders that `upgrade` and `ime-pkg` build themselves write 23000 by default.
+  Every item takes the serial and the ports from `modavd info --json` instead of computing `20000 + 10 × index` itself.
 - Problems and suggestions go to the [Issues](https://github.com/ModAVD/ModAVD/issues) of the ModAVD repository; pick "Pre-release regression". This repository only takes PRs.
 
 ## How to run
@@ -61,7 +64,7 @@ The suite refers to keys with `{Local:<key>}`, and the item scripts take their d
 | `TempRoot` | The root folder for temporary output | runner, all items |
 | `Manager` | The folder that holds `tools\modavd.exe` and `ModAVD.exe` | runner, all items |
 | `PackageScripts` | The `package\` of the ModAVD repository (the bridge install script `modavd-bridge.ps1` is in it) | runner, bridge, upgrade, game-real |
-| `TestRoot` | The ModAVD root folder used for testing (private adb port; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
+| `TestRoot` | The ModAVD root folder used for testing (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
 | `PrevPackage` | The package staging folder of the previous production version (a fixed copy) | upgrade |
 | `OfficialSdk` | The official SDK (`platform-tools`, `system-images`); the newly built root folder links to it, in place of the download of "fetch the Google components" | upgrade, ime-pkg |
 | `Launcher` | The launcher `avd-p0.ps1` (starts an AVD headless or windowed, with parameters such as `-AdbPort` and `-VulkanFix`) | game-real, ime |
@@ -109,7 +112,7 @@ REGRESS-RESULT {"pass":true,"summary":"reached the login page in 41 s; in game 5
 ```
 
 `items\common.ps1` is there for new items: `Set-RootSdk` temporarily points the test root's `mas-avd.json` at the SDK under test and switches it back when done; `M` calls the test root's `modavd.exe`,
-with the same post-boot setup as the product, and shuts down cleanly first, falling back to sync if that does not work; `A` / `Su` use the test root's private adb; `Result` prints the result line; `Use-Local` reads the local configuration.
+with the same post-boot setup as the product, and shuts down cleanly first, falling back to sync if that does not work; `A` / `Su` use the test root's private adb; `Get-InstancePorts` gives an instance's serial and ports as modavd reports them; `Result` prints the result line; `Use-Local` reads the local configuration.
 In the game UI, do only fixed operations such as "launch" and "tap Enter Game". When the screen has to be recognized, the script reads the pixels itself (`yys.ps1` recognizes the age-rating badge at the lower left of the login page, at both positions) and does not hand screenshots to a model to look at.
 
 ## Existing items (`suites\release.psd1`)

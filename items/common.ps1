@@ -44,11 +44,62 @@ function Get-RootConfig([string]$Root) { Get-Content -LiteralPath (Join-Path $Ro
 # modavd <参数...>，输出逐行返回，退出码在 $LASTEXITCODE
 function M { & (Join-Path $script:Root 'tools\modavd.exe') --root $script:Root @args 2>&1 | ForEach-Object { "$_" } }
 
+# modavd --json <参数...> 的 data；失败就报错。只读 stdout：--json 时进度日志写在 stderr，不能并进来。
+# $Exe 默认是根目录自己的 tools\modavd.exe。
+function Invoke-ModavdJson([string]$Root, [string]$Exe, [string[]]$Argv) {
+    if (-not $Exe) { $Exe = Join-Path $Root 'tools\modavd.exe' }
+    $out = & $Exe --root $Root --json @Argv 2>$null
+    $code = $LASTEXITCODE
+    $r = $null
+    try { $r = ($out -join "`n") | ConvertFrom-Json } catch { }
+    if ($code -ne 0 -or -not $r -or -not $r.ok) {
+        throw "modavd $($Argv -join ' ') 失败（退出码 $code）：$(if ($r.error) { $r.error.message } else { $out -join ' ' })"
+    }
+    $r.data
+}
+
+# 端口一律从 modavd 取，不自己按 20000 + 10 × 编号算：根目录在 mas-avd.json 里设了 portBase（开发、测试用的根目录，
+# 免得和同机生产根目录的同编号实例抢端口）时，实例不在 20000 段上。
+# 第 $i 台实例的 serial 和控制台 / adb / gRPC 端口（info --json）。实例要已经建好；同一个根目录的同一台只问一次。
+$script:PortsCache = @{}
+function Get-InstancePorts([int]$i, [string]$Root = $script:Root, [string]$Exe) {
+    $key = "$Root|$i"
+    if (-not $script:PortsCache.ContainsKey($key)) {
+        $d = Invoke-ModavdJson $Root $Exe @('info', "$i")
+        $script:PortsCache[$key] = [pscustomobject]@{ Serial = $d.serial; Console = [int]$d.ports.console; Adb = [int]$d.ports.adb; Grpc = [int]$d.ports.grpc }
+    }
+    $script:PortsCache[$key]
+}
+
+# 根目录的端口段（list --json 的 port_base）。还不认 portBase 的 modavd（ModAVD/ModAVD#75 以前）没有这一项，返回 $null，
+# 它的实例都在 20000 段上。
+function Get-PortBase([string]$Root = $script:Root, [string]$Exe) {
+    $d = Invoke-ModavdJson $Root $Exe @('list')
+    if ($d.PSObject.Properties.Name -contains 'port_base') { [int]$d.port_base } else { $null }
+}
+
+# 自己搭的根目录（upgrade、ime-pkg）在 mas-avd.json 写了 portBase $Want（0 = 没写）以后，modavd 实际用的端口段：
+# 还不认 portBase 的 modavd 是 20000；认的却不是 $Want 就报错。
+function Resolve-PortBase([string]$Root, [string]$Exe, [int]$Want) {
+    $base = Get-PortBase $Root $Exe
+    if ($null -eq $base) { return 20000 }
+    if ($Want -and $base -ne $Want) { throw "mas-avd.json 写了 portBase $Want，modavd 用的端口段却是 $base" }
+    $base
+}
+
+# 新建以后核对第 $i 台的端口落在端口段 $Base 上（控制台 = $Base + 10 × 编号），返回 Get-InstancePorts 的结果
+function Assert-InstancePorts([int]$i, [int]$Base, [string]$Root, [string]$Exe) {
+    $p = Get-InstancePorts $i $Root $Exe
+    if ($p.Console -ne $Base + 10 * $i) { throw "modavd 报的 $i 号控制台端口是 $($p.Console)，按端口段 $Base 应该是 $($Base + 10 * $i)" }
+    $p
+}
+
 # 对第 $script:Index 台实例的 adb（测试根的私有 adb server 和同一个 SDK 的 adb）
 function A {
     $cfg = Get-RootConfig $script:Root
     if ($cfg.adbServerPort -in 5037, 20049, 20050) { throw "测试根的 adb 端口是 $($cfg.adbServerPort)，不碰生产端口" }
-    & (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe') -P $cfg.adbServerPort -s "emulator-$(20000 + 10 * $script:Index)" @args 2>&1 | ForEach-Object { "$_" }
+    $serial = (Get-InstancePorts $script:Index).Serial
+    & (Join-Path $cfg.sdkRoot 'platform-tools\adb.exe') -P $cfg.adbServerPort -s $serial @args 2>&1 | ForEach-Object { "$_" }
 }
 
 # 以 root 跑一段客体脚本：推成文件再 sh，免得引号穿过 adb shell / su 两层

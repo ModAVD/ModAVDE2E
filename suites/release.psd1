@@ -112,7 +112,7 @@
             Args = @('-Next', '{Sdk}', '-Prev', '{Local:PrevPackage}', '-Work', '{ItemOut}\work')
             TimeoutMin = 30
         }
-        # 放在后面：测试根的 0 号和生产的 0 号同端口，生产在用时要等它关掉（最多 3 小时）
+        # 放在后面：测试根没设 portBase 时，它的 0 号和生产的 0 号同端口，生产在用时要等它关掉（最多 3 小时）
         @{
             Id = 'yys'; Title = '《阴阳师》冷启动进游戏、MaaYYs 自动御魂壹层 3 场（已装桥的实例）'
             Criterion = 'shim-ctor OK、有 zram、MaaYYs 认出庭院、无 Fatal signal；庭院、每场战斗帧率不低于上一版基准超过容差（兜底 ≥ 45 fps），战斗无超过 1 秒的帧；读条最慢一帧 ≤ 2 秒（同机别的模拟器多于 2 个时帧率只记录，读条放宽到 3 秒；睿频条件比基准差或判不出时帧率只记录）'

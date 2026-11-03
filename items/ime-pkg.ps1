@@ -1,6 +1,6 @@
 # 回归项：用组包目录新建实例，核对随包的宿主输入法（正式签名）开机自动装好、设为默认，跑通道 20 项，再核对开发签名换成正式签名。
 # 根目录照 upgrade.ps1 搭：组包目录整个复制一份（原件不动），adb、系统镜像链到 sdk-official，代替「补全组件」的下载；
-# mas-avd.json 只写私有端口。开关机一律用包里的 tools\modavd.exe（关机先正常关机、不成再 sync 后结束）。
+# mas-avd.json 只写私有端口和端口段（portBase）。开关机一律用包里的 tools\modavd.exe（关机先正常关机、不成再 sync 后结束）。
 #  a. modavd create 后第一次 modavd start（无头，和 AUTO-MAS 一样；首次初始化后自己装执行桥，中间关机再开机一两次）：
 #     org.modavd.ime 装上了，base.apk 和包里 components\modavd-ime.apk 逐字节相同（也就是正式签名），已启用，
 #     默认输入法是它，标记 /data/local/tmp/modavd-ime.autoselected 在；
@@ -23,8 +23,11 @@ param(
     [int]$Index = 9,
     # 根目录私有 adb server 的端口
     [int]$AdbPort = 20093,
-    # 脚本用的 adb server。不能落在本实例的控制台 / adb / gRPC 端口上：9 号是 20090–20092，upgrade.ps1 那样取 AdbPort - 1 会撞 gRPC
+    # 脚本用的 adb server。不能落在本实例的控制台 / adb / gRPC 端口上，设了 portBase 时也不能落在 20000 段的实例端口上
+    # （modavd 不让）：取 AdbPort - 1 会撞 20000 段 9 号的 gRPC（20092）
     [int]$ScriptAdbPort = $AdbPort + 1,
+    # 这个根目录的端口段（mas-avd.json 的 portBase），实例就不和同机生产根目录的同编号实例抢端口；0 = 不写，用 20000 段
+    [int]$PortBase = 23000,
     # 测试 APK（org.modavd.ime.testapp，ModAVDHostIME 编的，不随包发）和开发签名的同一个输入法
     # （ImeTestApk、DevImeApk）
     [string]$TestApk,
@@ -45,8 +48,7 @@ $BuildTools = Use-Local BuildTools $BuildTools '-BuildTools'
 $ReleaseCert = 'd18cca3c1982149349f164d28e02490b2eb694e44d56834fa02a1062eb42e823'
 $ImeId = 'org.modavd.ime/.HostImeService'
 $root = Join-Path $Work 'root'
-$consolePort = 20000 + 10 * $Index
-$serial = "emulator-$consolePort"
+$serial = ''   # 新建以后从 modavd 取
 $runDir = Join-Path $Work "logs-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $cliExe = Join-Path $root 'tools\modavd.exe'
 $adbExe = Join-Path $root 'sdk\platform-tools\adb.exe'
@@ -146,14 +148,8 @@ try {
     foreach ($f in $pkgApk, (Join-Path $Package 'tools\modavd.exe'), $TestApk, $DevImeApk, (Join-Path $BuildTools 'apksigner.bat')) {
         if (-not (Test-Path -LiteralPath $f)) { throw "找不到 $f" }
     }
-    $mine = $consolePort..($consolePort + 2)
-    foreach ($p in $AdbPort, $ScriptAdbPort) {
-        if ($p -in 5037, 20049, 20050) { throw "adb server 端口 $p 是生产用的，不碰" }
-        if ($p -in $mine) { throw "adb server 端口 $p 和 $Index 号实例的控制台 / adb / gRPC 端口（$($mine -join '、')）撞了" }
-    }
+    foreach ($p in $AdbPort, $ScriptAdbPort) { if ($p -in 5037, 20049, 20050) { throw "adb server 端口 $p 是生产用的，不碰" } }
     if ($AdbPort -eq $ScriptAdbPort) { throw '私有和脚本用的 adb server 端口不能一样' }
-    $busyPorts = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } | ForEach-Object { $_.LocalPort } | Sort-Object -Unique)
-    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')" }
     New-Item -ItemType Directory -Force $runDir | Out-Null
     $buildId = (Select-String -LiteralPath (Join-Path $Package 'sdk\emulator\source.properties') -Pattern '^Pkg\.BuildId=(.+)$').Matches[0].Groups[1].Value.Trim()
     $pkgSha = (Get-FileHash -LiteralPath $pkgApk).Hash.ToLower(); $pkgCert = CertOf $pkgApk
@@ -168,13 +164,25 @@ try {
     & robocopy $Package $root /E /COPY:DAT /R:5 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy $Package -> $root 失败（$LASTEXITCODE）" }
     foreach ($n in 'platform-tools', 'system-images') { New-Item -ItemType Junction -Path (Join-Path $root "sdk\$n") -Target (Join-Path $Official $n) | Out-Null }
-    [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $ScriptAdbPort`n}`n", [Text.UTF8Encoding]::new($false))
-    Log "根目录 $root（adb server $AdbPort / $ScriptAdbPort）"
+    $pb = if ($PortBase) { ",`n  `"portBase`": $PortBase" } else { '' }
+    [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $ScriptAdbPort$pb`n}`n", [Text.UTF8Encoding]::new($false))
+    # 实例的端口按包里的 modavd 用的端口段算：新建时就要无头开一次机，开之前先看端口
+    $base = Resolve-PortBase $root $cliExe $PortBase
+    if ($PortBase -and $base -ne $PortBase) { $notes += '包里的 modavd 还不认 portBase，实例在 20000 段上' }
+    $consolePort = $base + 10 * $Index
+    $mine = $consolePort..($consolePort + 2)
+    foreach ($p in $AdbPort, $ScriptAdbPort) {
+        if ($p -in $mine) { throw "adb server 端口 $p 和 $Index 号实例的控制台 / adb / gRPC 端口（$($mine -join '、')）撞了" }
+    }
+    $busyPorts = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } | ForEach-Object { $_.LocalPort } | Sort-Object -Unique)
+    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')" }
+    Log "根目录 $root（adb server $AdbPort / $ScriptAdbPort，端口段 $base）"
 
     # ---- a. 新建、第一次开机
     $o = Modavd create --index $Index --title 输入法回归 --memory 4G --cpu 4 --data-gb 16
     if ($LASTEXITCODE -ne 0) { throw "新建失败：$($o -join ' ')" }
     $created = $true
+    $serial = (Assert-InstancePorts $Index $base $root $cliExe).Serial
     $b = Boot 'a-first'
     $b.Ime | ForEach-Object { Log "  a: $_" }
     if ($b.Code -ne 0) { throw "第一次开机失败（退出码 $($b.Code)）：$($b.Tail)" }

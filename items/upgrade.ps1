@@ -1,7 +1,7 @@
 # 回归项：从上一个发布版升级。
-# 用上一版正式包的组包目录搭一个根目录：adb、系统镜像链到 sdk-official，代替「补全组件」的下载；mas-avd.json 只写私有端口，
-# 和 AUTO-MAS 加根目录时一样。用旧模拟器新建一台实例、开机、写标记数据、关机。旧包里没有 modavd，开关机用新编的，
-# 它是 AUTO-MAS 开关机流程的移植。再照「怎么更新」把新包整个覆盖上去（avd 不动），然后核对：
+# 用上一版正式包的组包目录搭一个根目录：adb、系统镜像链到 sdk-official，代替「补全组件」的下载；mas-avd.json 只写私有端口
+# 和端口段（portBase），和 AUTO-MAS 加根目录时一样。用旧模拟器新建一台实例、开机、写标记数据、关机。旧包里没有 modavd，
+# 开关机用新编的，它是 AUTO-MAS 开关机流程的移植。再照「怎么更新」把新包整个覆盖上去（avd 不动），然后核对：
 #  - 版本号是新的，包根的 ModAVD.exe / tools\modavd.exe / tools\modavd-bridge.ps1 都在
 #  - 用包里的 tools\modavd.exe 开机，标记数据都在
 #  - set --data-gb 改大后开机扩满（旧模拟器建的 64 GB 盘）
@@ -28,9 +28,14 @@ param(
     # 官方 SDK：根目录的 platform-tools、system-images 链到它，代替「补全组件」的下载（OfficialSdk）
     [string]$Official,
     [int]$Index = 4,
-    # 这个根目录私有 adb server 的端口（脚本用的是它减 1）。不能和别的测试机的模拟器端口撞：
+    # 这个根目录私有 adb server 的端口。不能和别的测试机的模拟器端口撞：
     # 10-29 用 20097 时，终末地 coldprof 的实例（20096/20097）起不来
     [int]$AdbPort = 20083,
+    # 脚本用的 adb server。设了 portBase 的根目录，modavd 不让两个 server 落在 20000 段的实例端口上：
+    # 以前取 AdbPort - 1（20082）正是 8 号的 gRPC 端口
+    [int]$ScriptAdbPort = $AdbPort + 1,
+    # 这个根目录的端口段（mas-avd.json 的 portBase），实例就不和同机生产根目录的同编号实例抢端口；0 = 不写，用 20000 段
+    [int]$PortBase = 23000,
     [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
@@ -41,7 +46,7 @@ if (-not $ModavdOut) { $ModavdOut = Use-Local Manager $script:ManagerDir '-Modav
 if (-not $Work) { $Work = Join-Path (Use-Local TempRoot $null '-Work') 'regress-upgrade' }
 $Official = Use-Local OfficialSdk $Official '-Official'
 $root = Join-Path $Work 'root'
-$serial = "emulator-$(20000 + 10 * $Index)"
+$serial = ''   # 新建以后从 modavd 取
 $script:CliExe = Join-Path $Work 'cli\modavd.exe'
 function Modavd { & $script:CliExe --root $root @args 2>&1 | ForEach-Object { "$_" } }
 function Adb { & (Join-Path $root 'sdk\platform-tools\adb.exe') -P $AdbPort -s $serial @args 2>&1 | ForEach-Object { "$_" } }
@@ -95,15 +100,19 @@ try {
     $env:TMPDIR = $netsimDir
     Overlay $Prev $root
     foreach ($n in 'platform-tools', 'system-images') { New-Item -ItemType Junction -Path (Join-Path $root "sdk\$n") -Target (Join-Path $Official $n) | Out-Null }
-    [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $($AdbPort - 1)`n}`n", [Text.UTF8Encoding]::new($false))
+    $pb = if ($PortBase) { ",`n  `"portBase`": $PortBase" } else { '' }
+    [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $ScriptAdbPort$pb`n}`n", [Text.UTF8Encoding]::new($false))
     New-Item -ItemType Directory -Force (Split-Path $script:CliExe) | Out-Null
     Copy-Item -LiteralPath $newCli -Destination $script:CliExe
     $oldId = BuildId (Join-Path $root 'sdk\emulator')
-    Say "上一版根目录 $root（$oldId）"
+    $base = Resolve-PortBase $root $script:CliExe $PortBase
+    if ($PortBase -and $base -ne $PortBase) { $notes += '这版 modavd 还不认 portBase，实例在 20000 段上' }
+    Say "上一版根目录 $root（$oldId，端口段 $base）"
 
     $o = Modavd create --index $Index --title 升级测试 --memory 4G --cpu 4
     if ($LASTEXITCODE -ne 0) { throw "旧版里新建失败：$($o -join ' ')" }
     $created = $true
+    $serial = (Assert-InstancePorts $Index $base $root $script:CliExe).Serial
     Remove-Item -LiteralPath (Join-Path $root "avd\mas_$Index.avd\modavd-writable-system") -ErrorAction SilentlyContinue   # 旧版建的没有
     Modavd start $Index --no-bridge | Select-Object -Last 1 | ForEach-Object { Say "  $_" }
     if ($LASTEXITCODE -ne 0) { throw "旧版开机失败（退出码 $LASTEXITCODE）" }
@@ -235,7 +244,7 @@ if [ -e /data/local/tmp/modavd-ime.autoselected ]; then echo mark=1; else echo m
     }
     # 这个根目录的私有 adb server 跑完就关：留着会一直占着端口
     if ($made) {
-        foreach ($p in $AdbPort, ($AdbPort - 1)) { & (Join-Path $Official 'platform-tools\adb.exe') -P $p kill-server 2>&1 | Out-Null }
+        foreach ($p in $AdbPort, $ScriptAdbPort) { & (Join-Path $Official 'platform-tools\adb.exe') -P $p kill-server 2>&1 | Out-Null }
     }
     if ($made -and -not $Keep) {
         # 根目录下还有进程在跑就不删：删一半的根目录比留着更难收拾

@@ -20,6 +20,9 @@ ModAVD 仓库里的随包脚本 `package/` 和执行桥 `bridge/`，所以单独
   代码里没有账号信息，测试号只在本机的测试实例里。**用模拟器和脚本运行游戏是否符合游戏的用户协议，请自行判断。**
 - **测试实例用新建的、登测试号的**，不要拿登着主力账号的实例来跑：有几项会建实例、删实例、强停游戏。
 - adb 只用私有端口，不碰 5037，也不碰生产根目录的 20049 / 20050；关实例一律先 `adb shell sync` 再关。
+- 测试机上同时有生产根目录时，测试根要在 `mas-avd.json` 里设 `portBase`（比如 21000，要管理器带 ModAVD/ModAVD#75），
+  实例的端口就不和生产的同编号实例撞；`upgrade`、`ime-pkg` 自己搭的根目录默认写 23000。各项的 serial 和端口都从
+  `modavd info --json` 取，不自己按 `20000 + 10 × 编号` 算。
 - 问题和建议到 ModAVD 仓库的 [Issues](https://github.com/ModAVD/ModAVD/issues) 提，选上「发版前回归」；本仓库只收 PR。
 
 ## 怎么跑
@@ -61,7 +64,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | `TempRoot` | 临时输出的根目录 | 运行器、各项 |
 | `Manager` | 放着 `tools\modavd.exe`、`ModAVD.exe` 的目录 | 运行器、各项 |
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
-| `TestRoot` | 测试用的 ModAVD 根目录（私有 adb 端口；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删） | bridge、bridge-default、datadisk、yys |
+| `TestRoot` | 测试用的 ModAVD 根目录（私有 adb 端口，同机有生产根目录时设 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删） | bridge、bridge-default、datadisk、yys |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |
 | `OfficialSdk` | 官方 SDK（`platform-tools`、`system-images`），新搭的根目录链到它，代替「补全组件」的下载 | upgrade、ime-pkg |
 | `Launcher` | 启动器 `avd-p0.ps1`（无头 / 带窗口开 AVD，带 `-AdbPort`、`-VulkanFix` 等参数） | game-real、ime |
@@ -109,7 +112,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 ```
 
 `items\common.ps1` 给新项用：`Set-RootSdk` 把测试根的 `mas-avd.json` 临时指到被测 SDK、跑完换回；`M` 调测试根的 `modavd.exe`，
-开机后的设置和产品一样，关机先正常关机、不成再 sync；`A` / `Su` 走测试根的私有 adb；`Result` 打结果行；`Use-Local` 取本机配置。
+开机后的设置和产品一样，关机先正常关机、不成再 sync；`A` / `Su` 走测试根的私有 adb；`Get-InstancePorts` 取 modavd 报的实例 serial 和端口；`Result` 打结果行；`Use-Local` 取本机配置。
 游戏界面只做「拉起」和「点进入游戏」这类固定操作，需要认画面时由脚本自己读像素（`yys.ps1` 认登录页左下角的适龄角标，两个位置都认），不交给模型看图。
 
 ## 现有的项（`suites\release.psd1`）
