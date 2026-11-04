@@ -209,21 +209,57 @@ function Test-QemuPath([string]$Path, [string[]]$Directories) {
         if ($d -and ($p.Equals($d, [StringComparison]::OrdinalIgnoreCase) -or
                 $p.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase))) { return $true }
     }
+    # The same AVD home may be reached through a directory junction or an 8.3
+    # alias. Resolve existing paths only after the lexical comparison failed.
+    $p = ConvertTo-QemuPath ([ModAVDRegressNative]::FinalPath($p))
+    if (-not $p) { return $false }
+    foreach ($directory in $Directories) {
+        $d = ConvertTo-QemuPath ([ModAVDRegressNative]::FinalPath($directory))
+        if ($d -and ($p.Equals($d, [StringComparison]::OrdinalIgnoreCase) -or
+                $p.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase))) { return $true }
+    }
     return $false
 }
 
 # Use Windows argument parsing, including spaces and backslashes before quotes.
 function Split-QemuCommandLine([string]$CommandLine) {
-    if (-not ('ModAVDRegressCommandLine' -as [type])) {
+    if (-not ('ModAVDRegressNative' -as [type])) {
         Add-Type @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-public static class ModAVDRegressCommandLine {
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public static class ModAVDRegressNative {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, StringBuilder path, uint size, uint flags);
+    public static string FinalPath(string path) {
+        if (String.IsNullOrEmpty(path)) return null;
+        // Metadata only, share read/write/delete, OPEN_EXISTING, BACKUP_SEMANTICS.
+        using (var file = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+            if (file.IsInvalid) return null;
+            var buffer = new StringBuilder(512);
+            uint size = GetFinalPathNameByHandleW(file, buffer, (uint)buffer.Capacity, 0);
+            if (size >= buffer.Capacity) {
+                buffer = new StringBuilder((int)size + 1);
+                size = GetFinalPathNameByHandleW(file, buffer, (uint)buffer.Capacity, 0);
+            }
+            return size > 0 && size < buffer.Capacity ? buffer.ToString() : null;
+        }
+    }
     [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CommandLineToArgvW(string commandLine, out int argc);
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileTime(SafeFileHandle file, out long created, out long accessed, out long written);
+    public static DateTime LastWriteTime(SafeFileHandle file) {
+        long created, accessed, written;
+        if (!GetFileTime(file, out created, out accessed, out written)) throw new Win32Exception();
+        return DateTime.FromFileTimeUtc(written);
+    }
     public static string[] Split(string commandLine) {
         int count;
         IntPtr memory = CommandLineToArgvW(commandLine, out count);
@@ -238,49 +274,104 @@ public static class ModAVDRegressCommandLine {
 }
 '@
     }
-    [ModAVDRegressCommandLine]::Split($CommandLine)
+    [ModAVDRegressNative]::Split($CommandLine)
 }
 
-function Get-QemuOwnership($Process, [string[]]$Names, [string[]]$Sdks, [string[]]$Roots) {
+# Read metadata and text through the same handle. Admit QEMU's writes/deletes;
+# probing a run lock must never prevent an emulator from starting or exiting.
+function Read-QemuFile([string]$Path, $Process) {
+    if (-not $Process.CreationDate) { return $null }
+    $stream = $null; $reader = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+        $written = [ModAVDRegressNative]::LastWriteTime($stream.SafeFileHandle)
+        if ($written -lt ([datetime]$Process.CreationDate).ToUniversalTime() -or $stream.Length -gt 64KB) { return $null }
+        $reader = [IO.StreamReader]::new($stream)
+        return $reader.ReadToEnd()
+    } catch { return $null }
+    finally { if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() } }
+}
+
+function Get-QemuRuntimeAvd($Process) {
+    # ConfigDirs::getDiscoveryDirectory on Windows. TEMP/TMP/TMPDIR do not
+    # select this directory. These files name global PIDs, not just AVD names.
+    $emuHome = $env:LOCALAPPDATA
+    if ($emuHome) { $discovery = Join-Path $emuHome 'Temp\avd\running' }
+    else {
+        $emuHome = $env:ANDROID_EMULATOR_HOME
+        if (-not $emuHome) {
+            foreach ($key in 'ANDROID_PREFS_ROOT', 'ANDROID_SDK_HOME') {
+                $emuHome = [Environment]::GetEnvironmentVariable($key)
+                if ($emuHome) {
+                    if (Test-Path -LiteralPath (Join-Path $emuHome '.android') -PathType Container) { $emuHome = Join-Path $emuHome '.android' }
+                    break
+                }
+            }
+        }
+        if (-not $emuHome) { $emuHome = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.android' }
+        $discovery = Join-Path $emuHome 'avd\running'
+    }
+    $text = Read-QemuFile (Join-Path $discovery "pid_$($Process.ProcessId).ini") $Process
+    if (-not $text) { return $null }
+    $dirs = @([regex]::Matches($text, '(?mi)^\s*avd\.dir\s*=(.*?)\s*$'))
+    if ($dirs.Count -eq 1) { return ConvertTo-QemuPath $dirs[0].Groups[1].Value }
+    return $null
+}
+
+function Get-QemuOwnership($Process, [string[]]$Names, [string[]]$Sdks, [string[]]$AvdHomes, [string[]]$WorkRoots) {
     # Never infer ownership from our own ANDROID_AVD_HOME: it is not the child's
     # environment. Inaccessible command lines must remain explicitly unknown.
     if ([string]::IsNullOrWhiteSpace($Process.CommandLine)) { return 'Unknown' }
     try { $argv = @(Split-QemuCommandLine $Process.CommandLine) } catch { return 'Unknown' }
-    $avds = @(); $dataPaths = @(); $systemPaths = @()
+    $avds = @(); $dataDirs = @()
     for ($i = 0; $i -lt $argv.Count; $i++) {
+        if ($argv[$i] -eq '-qemu') { break } # Remaining options belong to QEMU, not the emulator frontend.
         if ($argv[$i] -notin '-avd', '-datadir', '-data', '-sysdir') { continue }
         $option = $argv[$i]
         if (++$i -ge $argv.Count -or $argv[$i].StartsWith('-')) { return 'Unknown' }
         switch ($option) {
             '-avd' { $avds += $argv[$i] }
-            '-sysdir' { $systemPaths += $argv[$i] }
-            default { $dataPaths += $argv[$i] }
+            '-sysdir' { } # System images, like the executable, can be shared.
+            '-datadir' { $dataDirs += $argv[$i] }
+            '-data' { } # A disk image can also be used by an AVD in another root.
         }
     }
     if ($avds.Count -ne 1) { return 'Unknown' }
     if ($Names -notcontains $avds[0]) { return 'Other' }
-    # An explicit AVD data directory distinguishes roots even with a shared SDK.
-    if ($dataPaths.Count) {
-        foreach ($path in $dataPaths) {
+    $roots = @($AvdHomes) + @($WorkRoots)
+    $runtimeAvd = Get-QemuRuntimeAvd $Process
+    if ($runtimeAvd) {
+        if (Test-QemuPath $runtimeAvd $roots) { return 'Own' }
+        return 'Other'
+    }
+    # A fresh PID in the instance's run lock identifies early boots which have
+    # not written pid_<PID>.ini yet. Reject leftovers from a reused PID.
+    $avdDirs = @($AvdHomes | ForEach-Object { Join-Path $_ "$($avds[0]).avd" })
+    foreach ($work in $WorkRoots) {
+        $avdDirs += @(Get-ChildItem -LiteralPath $work -Directory -Recurse -Filter '*.avd' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "$($avds[0]).avd" } | ForEach-Object { $_.FullName })
+    }
+    foreach ($directory in $avdDirs) {
+        $holder = Read-QemuFile (Join-Path $directory 'hardware-qemu.ini.lock\pid') $Process
+        if ($holder -and $holder.Trim() -ceq [string]$Process.ProcessId) { return 'Own' }
+    }
+    # A data directory is explicit instance evidence; a -data file alone is not.
+    if ($dataDirs.Count -gt 1) { return 'Unknown' }
+    if ($dataDirs.Count) {
+        foreach ($path in $dataDirs) {
             if (-not (ConvertTo-QemuPath $path)) { return 'Unknown' }
-            if (-not (Test-QemuPath $path $Roots)) { return 'Other' }
+            if (-not (Test-QemuPath $path $roots)) { return 'Other' }
         }
         return 'Own'
     }
     $emulatorDirs = @($Sdks | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'emulator' })
-    if (Test-QemuPath $Process.ExecutablePath $emulatorDirs) { return 'Own' }
-    foreach ($path in $systemPaths) {
-        if (Test-QemuPath $path (@($Roots) + @($Sdks))) { return 'Own' }
-    }
+    if (Test-QemuPath $Process.ExecutablePath (@($emulatorDirs) + @($WorkRoots))) { return 'Unknown' }
     if (ConvertTo-QemuPath $Process.ExecutablePath) { return 'Other' }
     return 'Unknown'
 }
 
 $results = [System.Collections.Generic.List[object]]::new()
-$qemuRoots = @($Out; foreach ($key in 'TestRoot', 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
-        $value = Use-Local $key $null '' -Optional
-        if ($value) { $value }
-    })
+$qemuAvdHomes = @(); $qemuWorkRoots = @($Out)
 $sdkId = (Select-String -Path "$Sdk\emulator\source.properties" -Pattern '^Pkg\.BuildId=').Line
 $outDrive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Out))
 L "开始：套件 $Suite（$($items.Count) 项，改动范围 $(if ($Scope) { $Scope -join ', ' } else { '按 -Only 点名' })）；SDK $Sdk（$sdkId）；对照 $(if ($Baseline) { $Baseline } else { '无' })；输出所在的 $($outDrive.Name) 可用 $([int]($outDrive.AvailableFreeSpace / 1GB)) GB"
@@ -302,9 +393,20 @@ foreach ($it in $items) {
     if ($w) { $r.status = '跳过'; $r.summary = "在不能跑的时段 $w"; L "[$($it.Id)] 跳过：现在在 $w 里"; $results.Add([pscustomobject]$r); continue }
     if (-not (WaitRes $it)) { $r.status = '跳过'; $r.summary = '资源一直不够'; L "[$($it.Id)] 跳过：资源一直不够"; $results.Add([pscustomobject]$r); continue }
     # Item arguments can override the local configuration's root/AVD home.
+    $itemRoot = Use-Local TestRoot $null '' -Optional
+    $itemHomes = @(foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
+            $value = Use-Local $key $null '' -Optional
+            if ($value) { $value }
+        })
     for ($i = 0; $i -lt $argv.Count - 1; $i++) {
-        if ($argv[$i] -in '-Root', '-AvdHome') { $qemuRoots += $argv[++$i] }
+        switch ($argv[$i]) {
+            '-Root' { $itemRoot = $argv[++$i] }
+            '-AvdHome' { $itemHomes = @($argv[++$i]) }
+            '-Work' { $qemuWorkRoots += $argv[++$i] }
+        }
     }
+    if ($itemRoot) { $itemHomes += Join-Path $itemRoot 'avd' }
+    $qemuAvdHomes += $itemHomes
     New-Item -ItemType Directory -Force $itemOut | Out-Null
     $console = Join-Path $Out "$($it.Id).console.txt"
     $r.console = $console
@@ -332,16 +434,18 @@ foreach ($it in $items) {
     $results.Add([pscustomobject]$r)
 }
 
-# 套件名字只筛候选；归属还要有本次 SDK 或测试目录的路径证据。
+# 套件名字只筛候选；SDK 和系统镜像可以共用，归属必须有 AVD 目录证据。
 $names = @($suiteData.Avds)
-$left = @(try {
-        foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" -ErrorAction Stop)) {
-            switch (Get-QemuOwnership $process $names @($Sdk, $Baseline) $qemuRoots) {
-                'Own' { $process }
-                'Unknown' { L "qemu $($process.ProcessId) 无法判断归属（命令行或路径证据不足）" }
-            }
+try { $qemuProcesses = @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" -ErrorAction Stop) }
+catch { L 'qemu：无法判断归属（无法查询进程信息）'; $qemuProcesses = @() }
+$left = @(foreach ($process in $qemuProcesses) {
+        try { $ownership = Get-QemuOwnership $process $names @($Sdk, $Baseline) $qemuAvdHomes $qemuWorkRoots }
+        catch { $ownership = 'Unknown' }
+        switch ($ownership) {
+            'Own' { $process }
+            'Unknown' { L "qemu $($process.ProcessId) 无法判断归属（命令行或路径证据不足）" }
         }
-    } catch { L 'qemu：无法判断归属（无法查询进程信息）' })
+    })
 L "留下的测试机 qemu：$(if ($left) { ($left | ForEach-Object { $_.ProcessId }) -join ',' } else { '无' })"
 
 $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Out 'results.json') -Encoding utf8
