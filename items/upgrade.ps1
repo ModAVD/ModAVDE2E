@@ -2,7 +2,7 @@
 # 用上一版正式包的组包目录搭一个根目录：adb、系统镜像链到 sdk-official，代替「补全组件」的下载；mas-avd.json 只写私有端口
 # 和端口段（portBase），和 AUTO-MAS 加根目录时一样。用旧模拟器新建一台实例、开机、写标记数据、关机。旧包里没有 modavd，
 # 开关机用新编的，它是 AUTO-MAS 开关机流程的移植。再照「怎么更新」把新包整个覆盖上去（avd 不动），然后核对：
-#  - 包根清单的版本号上升（SDK 或缺清单时按构建号是否改变判），包根的 ModAVD.exe / tools\modavd.exe / tools\modavd-bridge.ps1 都在
+#  - 组包目录按包根清单的版本号是否上升判，缺清单时按构建号判；SDK 构建号相同只记说明。包根文件都在
 #  - 用包里的 tools\modavd.exe 开机，标记数据都在
 #  - set --data-gb 改大后开机扩满（旧模拟器建的 64 GB 盘）
 #  - 升级后第一次用 modavd（管理器同一套）照常开机，旧实例自己装上执行桥（10-30 起用户不用自己装）。
@@ -174,11 +174,13 @@ echo "sdwait=$i"
     # SDK 覆盖和不带清单的旧包会留下原清单，不能把它当成新包的版本。
     $newVersion = if ($nextHasManifest) { PackageVersion $root } else { $null }
     if ($nextHasManifest -and -not $newVersion) { throw '覆盖后缺 modavd-manifest.json' }
-    if ($oldVersion -and $newVersion) {
+    if (-not $nextIsTree) {
+        if ($newId -eq $oldId) { $notes += 'SDK 模式，构建号没变，补丁版只换管理器时正常' }
+    } elseif ($oldVersion -and $newVersion) {
         $notes += "清单版本 $($oldVersion.Text) -> $($newVersion.Text)"
         if ($newVersion.Value -le $oldVersion.Value) { $problems += "覆盖后清单版本没有上升：$($oldVersion.Text) -> $($newVersion.Text)" }
     } else {
-        $notes += 'SDK 或缺包清单，按构建号判定'
+        $notes += '缺包清单，按构建号判定'
         if ($newId -eq $oldId) { $problems += "覆盖后构建号还是 $oldId" }
     }
     $notes += "构建号 $oldId -> $newId"
