@@ -2,7 +2,7 @@
 # 用上一版正式包的组包目录搭一个根目录：adb、系统镜像链到 sdk-official，代替「补全组件」的下载；mas-avd.json 只写私有端口
 # 和端口段（portBase），和 AUTO-MAS 加根目录时一样。用旧模拟器新建一台实例、开机、写标记数据、关机。旧包里没有 modavd，
 # 开关机用新编的，它是 AUTO-MAS 开关机流程的移植。再照「怎么更新」把新包整个覆盖上去（avd 不动），然后核对：
-#  - 版本号是新的，包根的 ModAVD.exe / tools\modavd.exe / tools\modavd-bridge.ps1 都在
+#  - 包根清单的版本号上升（SDK 或缺清单时按构建号是否改变判），包根的 ModAVD.exe / tools\modavd.exe / tools\modavd-bridge.ps1 都在
 #  - 用包里的 tools\modavd.exe 开机，标记数据都在
 #  - set --data-gb 改大后开机扩满（旧模拟器建的 64 GB 盘）
 #  - 升级后第一次用 modavd（管理器同一套）照常开机，旧实例自己装上执行桥（10-30 起用户不用自己装）。
@@ -59,6 +59,15 @@ function SuRun([string]$Script) {
     Adb shell 'su 0 sh /data/local/tmp/regress.sh; rm -f /data/local/tmp/regress.sh'
 }
 function BuildId([string]$sdkEmu) { (Select-String -LiteralPath (Join-Path $sdkEmu 'source.properties') -Pattern '^Pkg\.BuildId=(.+)$').Matches[0].Groups[1].Value.Trim() }
+function PackageVersion([string]$Package) {
+    $manifest = Join-Path $Package 'modavd-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifest)) { return $null }
+    try {
+        $text = (Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).version
+        if ($text -isnot [string] -or [string]::IsNullOrWhiteSpace($text)) { throw 'version 必须是非空字符串' }
+        [pscustomobject]@{ Text = $text; Value = [semver]($text -creplace '^v', '') }
+    } catch { throw "包清单版本无效（${manifest}）：$($_.Exception.Message)" }
+}
 function Overlay([string]$from, [string]$to) {
     & robocopy $from $to /E /COPY:DAT /R:5 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy $from -> $to 失败（$LASTEXITCODE）" }
@@ -84,6 +93,7 @@ try {
     if (-not (Test-Path (Join-Path $Prev 'sdk\emulator\emulator.exe'))) { throw "上一版的组包目录不对：$Prev" }
     $nextIsTree = Test-Path (Join-Path $Next 'sdk\emulator\emulator.exe')
     if (-not $nextIsTree -and -not (Test-Path (Join-Path $Next 'emulator\emulator.exe'))) { throw "新包既不是组包目录也不是 SDK：$Next" }
+    $nextHasManifest = $nextIsTree -and (Test-Path -LiteralPath (Join-Path $Next 'modavd-manifest.json'))
     $newCli = if ($nextIsTree) { Join-Path $Next 'tools\modavd.exe' } else { Join-Path $ModavdOut 'tools\modavd.exe' }
     if (-not (Test-Path $newCli)) { throw "找不到新的 modavd.exe：$newCli" }
     $imeApk = if ($nextIsTree) { Join-Path $Next 'components\modavd-ime.apk' } else { '' }
@@ -105,6 +115,7 @@ try {
     New-Item -ItemType Directory -Force (Split-Path $script:CliExe) | Out-Null
     Copy-Item -LiteralPath $newCli -Destination $script:CliExe
     $oldId = BuildId (Join-Path $root 'sdk\emulator')
+    $oldVersion = PackageVersion $root
     $base = Resolve-PortBase $root $script:CliExe $PortBase
     if ($PortBase -and $base -ne $PortBase) { $notes += '这版 modavd 还不认 portBase，实例在 20000 段上' }
     Say "上一版根目录 $root（$oldId，端口段 $base）"
@@ -160,8 +171,17 @@ echo "sdwait=$i"
     $newId = BuildId (Join-Path $root 'sdk\emulator')
     $missing = @('ModAVD.exe', 'tools\modavd.exe', 'tools\modavd-bridge.ps1') | Where-Object { -not (Test-Path (Join-Path $root $_)) }
     if ($missing) { $problems += "覆盖后缺：$($missing -join '、')" }
-    if ($newId -eq $oldId) { $problems += "覆盖后版本号还是 $oldId" }
-    $notes += "$oldId -> $newId"
+    # SDK 覆盖和不带清单的旧包会留下原清单，不能把它当成新包的版本。
+    $newVersion = if ($nextHasManifest) { PackageVersion $root } else { $null }
+    if ($nextHasManifest -and -not $newVersion) { throw '覆盖后缺 modavd-manifest.json' }
+    if ($oldVersion -and $newVersion) {
+        $notes += "清单版本 $($oldVersion.Text) -> $($newVersion.Text)"
+        if ($newVersion.Value -le $oldVersion.Value) { $problems += "覆盖后清单版本没有上升：$($oldVersion.Text) -> $($newVersion.Text)" }
+    } else {
+        $notes += 'SDK 或缺包清单，按构建号判定'
+        if ($newId -eq $oldId) { $problems += "覆盖后构建号还是 $oldId" }
+    }
+    $notes += "构建号 $oldId -> $newId"
     $script:CliExe = Join-Path $root 'tools\modavd.exe'
 
     # ---- 升级后（modavd 自己的宿主输入法那行日志留下来，看是哪次开机装上的）
