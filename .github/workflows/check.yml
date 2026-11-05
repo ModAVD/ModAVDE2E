@@ -41,5 +41,8 @@ jobs:
       - name: Check the manager requirement, port_base check and game port guard
         shell: pwsh
         run: ./tests/tooling-guards.ps1
+      - name: Check how the r1999 item judges the M9A driver
+        shell: pwsh
+        run: ./tests/m9a-verdict.ps1
       - name: Scan tracked files for private identity and paths
         run: python3 .modavd/scripts/privacy.py .

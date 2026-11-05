@@ -1,7 +1,9 @@
 # 回归项：用各游戏自己的自动化脚本实跑。驱动、实例、启动器、采样脚本都在仓库外，位置在本机配置
 # （local.example.psd1）里：
 #   -Game ark   明日方舟：MAA 集成战略（Kit 的 w1-maa\maa_roguelike.py，先 StartUp 再肉鸽），GameAvdHome 的 mas_6
-#         r1999 重返未来：1999：M9A 启动游戏 + 智能均衡刷材料（Kit 的 m9a_run411_load.py），GameAvdHome 的 mas_7
+#         r1999 重返未来：1999：M9A 启动游戏 + 常规作战打资源本（Kit 的 m9a_run411_load.py），GameAvdHome 的 mas_7；
+#               体力不够时吃不吃糖看 -M9ACandy（默认 0 不吃）。11-05 起不用「智能均衡刷材料」：M9A 4.11.1 里它自己报错、
+#               什么都不打就「成功」退出
 #         sr    崩坏：星穹铁道：SRC 模拟宇宙（SrcKit 的 stress.py，日常挂起；SRC 本身在 SrcDir），SrAvdHome 的 gfx_t2
 #         ef    明日方舟：终末地：MaaEnd（MaaEndDir 的 maaend-run.ps1 -OpenGame），只跑领取类任务，GameAvdHome 的 endfield
 #   -Rounds on（默认）：只跑装桥那一轮，和用户实例一样默认带桥、按包名分流（不再跑不装桥的对照）。
@@ -29,7 +31,9 @@ param(
     # 客体 Vulkan 修复库（本机配置 VulkanFixLib）
     [string]$VulkanFixLib,
     # 不开机、不跑：按 -Out 下各轮存好的驱动输出、采样、日志和 round.json 重新判一次（判法改了以后用）
-    [switch]$ReJudge
+    [switch]$ReJudge,
+    # r1999：常规作战体力不够时最多吃几次糖（传给驱动的 M9A_CANDY）；0 = 不吃，没体力时驱动很快结束，判成没打到战斗
+    [ValidateRange(0, 10)][int]$M9ACandy = 0
 )
 $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
@@ -105,7 +109,7 @@ function Stop {
 # -Root 指向 $Out\bridge-root（里面的 sdk 是联接到被测 SDK 的）：脚本按它找模拟器版本，工作文件（含客体
 # build.prop 的备份）落在回归输出里，不落进仓库的 tools\logs。输出先改成 UTF-8，免得中文变问号。
 $bridgeRoot = Join-Path $Out 'bridge-root'
-if (-not (Test-Path (Join-Path $bridgeRoot 'sdk'))) {
+if (-not $ReJudge -and -not (Test-Path (Join-Path $bridgeRoot 'sdk'))) {
     New-Item -ItemType Directory -Force $bridgeRoot | Out-Null
     New-Item -ItemType Junction -Path (Join-Path $bridgeRoot 'sdk') -Target $Sdk | Out-Null
 }
@@ -126,7 +130,7 @@ function StartDriver([string]$dir) {
     $env:MAS_AVD_PORT = "$($cfg.Port)"; $env:PYTHONIOENCODING = 'utf-8'
     switch ($Game) {
         'ark' { $env:MAA_LOOP_MIN = "$Minutes"; $env:MAA_LOG = Join-Path $dir 'maa.jsonl'; $exe = 'py'; $al = @('-3.12', '-u', 'maa_roguelike.py', '--adb-port', "$AdbPort"); $wd = "$kit\w1-maa" }
-        'r1999' { $env:M9A_BUDGET_MIN = "$Minutes"; $exe = "$kit\m9a4111\python\python.exe"; $al = @('-u', 'm9a_run411_load.py', '--adb-port', "$AdbPort"); $wd = $kit }
+        'r1999' { $env:M9A_BUDGET_MIN = "$Minutes"; $env:M9A_CANDY = "$M9ACandy"; Remove-Item Env:M9A_PLAN -ErrorAction SilentlyContinue; $exe = "$kit\m9a4111\python\python.exe"; $al = @('-u', 'm9a_run411_load.py', '--adb-port', "$AdbPort"); $wd = $kit }
         'sr' {
             # 和内存测试的星铁负载一样：模拟宇宙，日常全部挂起 23 小时（生产做日常）
             $env:STRESS_MIN = "$Minutes"; $env:STRESS_TRIAL_ROUNDS = '0'; $env:STRESS_ROGUE = '1'
@@ -164,11 +168,15 @@ function DriverVerdict([string]$dir, [int]$exitCode) {
         }
         'r1999' {
             if ($t -notmatch 'done  启动游戏: succeeded') { return $false, 'M9A 启动游戏没成功' }
-            $farm = [regex]::Match($t, 'done  智能均衡刷材料: (\w+) in ([\d.]+) min')
+            $fight = [regex]::Match($t, 'done  常规作战: (\w+) in ([\d.]+) min')
             $budgetStop = $t -match '\(budget stop\)'
-            if (-not $farm.Success) { return $false, 'M9A 刷材料没跑' }
-            if ($farm.Groups[1].Value -ne 'succeeded' -and -not $budgetStop) { return $false, "M9A 刷材料 $($farm.Groups[1].Value)" }
-            return $true, "M9A 刷材料 $($farm.Groups[1].Value)$(if ($budgetStop) { '（到时间停）' })，$($farm.Groups[2].Value) 分钟"
+            if (-not $fight.Success) { return $false, 'M9A 常规作战没跑' }
+            if ($fight.Groups[1].Value -ne 'succeeded' -and -not $budgetStop) { return $false, "M9A 常规作战 $($fight.Groups[1].Value)" }
+            # 没体力（又不吃糖）时常规作战一进去就「成功」退出，没有战斗可测（11-05 回归：0.4–0.6 分钟；吃两次糖打完是 3.4 分钟）
+            if (-not $budgetStop -and [double]$fight.Groups[2].Value -lt 2) {
+                return $false, "M9A 常规作战 $($fight.Groups[2].Value) 分钟就结束，没打到战斗（体力不够？要吃糖就带 -M9ACandy <次数>）"
+            }
+            return $true, "M9A 常规作战 $($fight.Groups[1].Value)$(if ($budgetStop) { '（到时间停）' })，$($fight.Groups[2].Value) 分钟"
         }
         'sr' {
             if ($t -match 'Traceback') { return $false, 'SRC 驱动有 Traceback' }

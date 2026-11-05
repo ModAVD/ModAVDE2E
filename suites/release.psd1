@@ -64,8 +64,8 @@
             TimeoutMin = 60
         }
         @{
-            Id = 'r1999'; Title = '《重返未来：1999》M9A：启动游戏 + 智能均衡刷材料 15 分钟（装桥，耗体力一天一轮）'
-            Criterion = 'M9A 启动游戏成功、刷材料成功或到时间停；游戏不重启；无 native crash / ANR / Vulkan 报错 / 新转储；帧率不低于上一版基准超过容差'
+            Id = 'r1999'; Title = '《重返未来：1999》M9A：启动游戏 + 常规作战打资源本 15 分钟（装桥，耗体力一天一轮）'
+            Criterion = 'M9A 启动游戏成功、常规作战成功或到时间停，而且真打了（不到 2 分钟就结束算没打）；游戏不重启；无 native crash / ANR / Vulkan 报错 / 新转储；帧率不低于上一版基准超过容差'
             Scopes = @('emulator')
             Script = '{Repo}\items\game-real.ps1'
             Args = @('-Game', 'r1999', '-Sdk', '{Sdk}', '-Out', '{ItemOut}')
