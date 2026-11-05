@@ -21,7 +21,7 @@ ModAVD 仓库里的随包脚本 `package/` 和执行桥 `bridge/`，所以单独
 - **测试实例用新建的、登测试号的**，不要拿登着主力账号的实例来跑：有几项会建实例、删实例、强停游戏。
 - adb 只用私有端口，不碰 5037，也不碰生产根目录的 20049 / 20050；关实例一律先 `adb shell sync` 再关。
 - 测试机上同时有生产根目录时，测试根要在 `mas-avd.json` 里设 `portBase`（比如 21000，要管理器带 ModAVD/ModAVD#75），
-  实例的端口就不和生产的同编号实例撞；`upgrade`、`ime-pkg` 自己搭的根目录默认写 23000。各项的 serial 和端口都从
+  实例的端口就不和生产的同编号实例撞。回归不新建根目录（11-05 起）：实例都建在 `E:\testbed` 下已有的测试根里，`upgrade`、`ime-pkg` 也是在 `PackageRoot`（没有就 `TestRoot`）上先装包、建临时实例，测完只删实例。生产根目录（本机配置 `ProductionRoots`，默认 `D:\ModAVD`）和生产的 adb 端口 5037 / 20049 / 20050 当测试根、输出、工作目录一律拒绝。各项的 serial 和端口都从
   `modavd info --json` 取，不自己按 `20000 + 10 × 编号` 算。
 - 问题和建议到 ModAVD 仓库的 [Issues](https://github.com/ModAVD/ModAVD/issues) 提，选上「发版前回归」；本仓库只收 PR。
 
@@ -47,7 +47,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 基准记着测的时候睿频开没开（`condition`）：测的时候按宿主 CPU 的「处理器性能」判（超过 101 % 就是开着）。这次条件比基准差（睿频关对睿频开的基准）或者判不出时只记录不判；比基准好照判，睿频只会让帧率更高。
 每次发版回归通过后，把这一版的数和条件写回 `fps.json`。
 
-输出默认在 `<TempRoot>\regress-<构建>-<时间>\`（本机配置有 `TempRoot` 时 `-Out` 也必须在它下面）：每项的控制台 `<项>.console.txt`、
+输出默认在 `<TempRoot>\regress-<构建>-<时间>\`（`-Out` 放哪都行，只是不能在生产根目录下）：每项的控制台 `<项>.console.txt`、
 项目自己的输出 `<项>\`、总日志 `regress.log`、`results.json` 和 `results.md`。有一项不是「通过」，退出码就是 1。
 日志开头记下测的是哪一版：管理器命令行的哈希、随包脚本所在仓库的提交、本仓库的提交。
 
@@ -66,9 +66,10 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | `TempRoot` | 临时输出的根目录 | 运行器、各项 |
 | `GamePorts` | 游戏实例的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096，写成 `@{ sr = 20130 }` 覆盖；落在生产的 20000–20049 或碰 5037、20049、20050 就报错停下 | game-real |
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
-| `TestRoot` | 测试用的 ModAVD 根目录（私有 adb 端口，同机有生产根目录时设 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删） | bridge、bridge-default、datadisk、yys |
+| `ProductionRoots` | 生产根目录，默认 `D:\ModAVD`；测试根、输出、工作目录在它下面就停 | 运行器、各项 |
+| `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（私有 adb 端口、`portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）就停，不新建 | bridge、bridge-default、datadisk、yys |
+| `PackageRoot` | 装包类的项用的测试根（不写就用 `TestRoot`）：先装成要测的包，测完根目录停在新包上 | upgrade、ime-pkg |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |
-| `OfficialSdk` | 官方 SDK（`platform-tools`、`system-images`），新搭的根目录链到它，代替「补全组件」的下载 | upgrade、ime-pkg |
 | `Launcher` | 启动器 `avd-p0.ps1`（无头 / 带窗口开 AVD，带 `-AdbPort`、`-VulkanFix` 等参数） | game-real、ime |
 | `Monitor` | 采样脚本 `emu_monitor.py`（30 秒一行：帧率、重启、崩溃、ANR、Vulkan 报错） | game-real |
 | `VulkanFixLib` | 客体 Vulkan 修复库 | game-real |
@@ -127,7 +128,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 | ark / r1999 / sr / ef | `items\game-real.ps1` | 各游戏自己的自动化脚本实跑 15 分钟（装桥那轮），帧率和 `baselines\fps.json` 比 |
 | bridge | `items\bridge.ps1` | 执行桥装 / 卸全流程（Windows PowerShell 5.1），新建 6 号实例跑完删掉 |
 | datadisk | `items\datadisk.ps1` | 新盘 inode 封顶、`set --data-gb` 扩容，新建 3 号实例跑完删掉 |
-| upgrade | `items\upgrade.ps1` | 用上一版正式包搭根目录、建实例写数据，照「怎么更新」覆盖新包后核对开机、数据、扩容、照常开机自动装桥；`-Next` 是组包目录（带 `components\modavd-ime.apk`）时还核对宿主输入法跟着包过来、装上的是正式签名那份并设为默认（`-Next` 是 SDK 时不查）；根目录跑完删掉 |
+| upgrade | `items\upgrade.ps1` | 在 `PackageRoot` 上先按包根清单装回上一版正式包、建临时实例写数据，照「怎么更新」覆盖新包后核对开机、数据、扩容、照常开机自动装桥；`-Next` 是组包目录（带 `components\modavd-ime.apk`）时还核对宿主输入法跟着包过来、装上的是正式签名那份并设为默认（`-Next` 是 SDK 时不查）；跑完删临时实例，根目录停在新包上 |
 | yys | `items\yys.ps1` | 阴阳师冷启动进游戏测帧（测试根的 0 号，已装桥、已登录），再用 MaaYYs（`items\maayys_run.py`）真打御魂 |
 | ef-ab | `items\ef-ab.ps1` | 终末地冷启动新旧交替，等宿主空闲才测 |
 
@@ -137,7 +138,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 
 | 项 | 脚本 | 说明 |
 | --- | --- | --- |
-| ime-pkg | `items\ime-pkg.ps1` | `-Package <组包目录>`（`release\ModAVD-<版本>-win-x64`，只读）：复制成根目录、新建 9 号实例，核对正式签名的输入法开机自动装好、设为默认，带窗口跑通道 20 项，再核对开发签名的换成正式签名、稳态不变；根目录跑完删掉，日志留在 `-Work` 下 |
+| ime-pkg | `items\ime-pkg.ps1` | `-Package <组包目录>`（`release\ModAVD-<版本>-win-x64`，只读）：按包根清单装进 `PackageRoot`、新建 9 号临时实例，核对正式签名的输入法开机自动装好、设为默认，带窗口跑通道 20 项，再核对开发签名的换成正式签名、稳态不变；跑完删临时实例，根目录停在这个包上，日志留在 `-Work` 下 |
 
 ## 以后有了专门跑测试的机器
 

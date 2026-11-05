@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
-$Root = Use-Local TestRoot $Root '-Root'
+$Root = Resolve-TestRoot (Use-Local TestRoot $Root '-Root')
 if (-not $BridgeScript) { $BridgeScript = Join-Path (Get-PackageScripts) 'modavd-bridge.ps1' }
 $payload = Join-Path $Sdk 'emulator\resources\modavd'
 

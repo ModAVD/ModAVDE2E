@@ -21,7 +21,7 @@ and the bundled scripts in `package/` and the bridge in `bridge/` of the ModAVD 
 - **Use newly created test instances logged in with test accounts.** Do not run on an instance logged in with your main account: several items create instances, delete instances and force-stop the game.
 - adb uses only private ports. It does not touch 5037, and it does not touch 20049 / 20050 of the production root folder. Every instance is shut down with `adb shell sync` first.
 - When the test machine also has a production root folder, set `portBase` in the test root's `mas-avd.json` (for example 21000; needs a manager with ModAVD/ModAVD#75),
-  so that its instances do not share ports with the production instances of the same number. The root folders that `upgrade` and `ime-pkg` build themselves write 23000 by default.
+  so that its instances do not share ports with the production instances of the same number. The regression creates no root folders (since 11-05): instances go into the existing test roots under `E:\testbed`, and `upgrade` and `ime-pkg` also first install the package into `PackageRoot` (or `TestRoot`), create a temporary instance there and delete only that instance afterwards. The production root folder (local setting `ProductionRoots`, `D:\ModAVD` by default) and the production adb ports 5037 / 20049 / 20050 are refused as test root, output or work folder.
   Every item takes the serial and the ports from `modavd info --json` instead of computing `20000 + 10 × index` itself.
 - Problems and suggestions go to the [Issues](https://github.com/ModAVD/ModAVD/issues) of the ModAVD repository; pick "Pre-release regression". This repository only takes PRs.
 
@@ -47,7 +47,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 The baseline records whether CPU boost (turbo) was on when it was measured (`condition`: `睿频开` on, `睿频关` off). During a run this is read from the host CPU's "processor performance" counter (above 101 % means boost is on). When this run's condition is worse than the baseline's (boost off against a boost-on baseline) or cannot be read, the number is only recorded, not judged; when it is better, it is judged as usual, since boost only raises the frame rate.
 After each release regression passes, write this version's numbers and condition back to `fps.json`.
 
-By default the output goes to `<TempRoot>\regress-<build>-<time>\` (when the local configuration has `TempRoot`, `-Out` must also be under it): the console output of each item `<item>.console.txt`,
+By default the output goes to `<TempRoot>\regress-<build>-<time>\` (`-Out` can be anywhere except under the production root folder): the console output of each item `<item>.console.txt`,
 the item's own output `<item>\`, the overall log `regress.log`, `results.json` and `results.md`. If any item is not "passed", the exit code is 1.
 The start of the log records which build was tested: the hash of the manager's CLI, the commit of the repository that holds the bundled scripts, and the commit of this repository.
 
@@ -66,9 +66,10 @@ The suite refers to keys with `{Local:<key>}`, and the item scripts take their d
 | `TempRoot` | The root folder for temporary output | runner, all items |
 | `GamePorts` | The console ports of the game instances; defaults are ark 20072, r1999 20100, sr 20120, ef 20096; override with `@{ sr = 20130 }`. A port inside the production 20000-20049 range, or touching 5037, 20049 or 20050, stops with an error | game-real |
 | `PackageScripts` | The `package\` of the ModAVD repository (the bridge install script `modavd-bridge.ps1` is in it) | runner, bridge, upgrade, game-real |
-| `TestRoot` | The ModAVD root folder used for testing (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
+| `ProductionRoots` | The production root folders, `D:\ModAVD` by default; a test root, output or work folder under them stops the run | runner, all items |
+| `TestRoot` | The ModAVD root folder used for testing: the existing flow-a / flow-b under `E:\testbed`; a folder that is not an existing root (no `mas-avd.json`) stops the run, none is created (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
+| `PackageRoot` | The test root for the items that install a package (`TestRoot` when not set): it is turned into the package under test first and stays on the new package afterwards | upgrade, ime-pkg |
 | `PrevPackage` | The package staging folder of the previous production version (a fixed copy) | upgrade |
-| `OfficialSdk` | The official SDK (`platform-tools`, `system-images`); the newly built root folder links to it, in place of the download of "fetch the Google components" | upgrade, ime-pkg |
 | `Launcher` | The launcher `avd-p0.ps1` (starts an AVD headless or windowed, with parameters such as `-AdbPort` and `-VulkanFix`) | game-real, ime |
 | `Monitor` | The sampling script `emu_monitor.py` (one line every 30 s: frame rate, restarts, crashes, ANRs, Vulkan errors) | game-real |
 | `VulkanFixLib` | The guest Vulkan fix library | game-real |
@@ -127,7 +128,7 @@ In the game UI, do only fixed operations such as "launch" and "tap Enter Game". 
 | ark / r1999 / sr / ef | `items\game-real.ps1` | A 15-minute real run of each game with its own automation scripts (the round with the bridge installed), with the frame rate compared with `baselines\fps.json` |
 | bridge | `items\bridge.ps1` | The whole flow of installing / uninstalling the bridge (Windows PowerShell 5.1); it creates instance 6 and deletes it after the run |
 | datadisk | `items\datadisk.ps1` | The inode cap on a new disk and growing with `set --data-gb`; it creates instance 3 and deletes it after the run |
-| upgrade | `items\upgrade.ps1` | Builds a root folder from the previous release package, creates an instance and writes data, overlays the new package following "How to update", then checks boot, data, growing the disk, and that a normal boot installs the bridge automatically. When `-Next` is a package staging folder (with `components\modavd-ime.apk`), it also checks that the host IME came with the package, that the installed one is the officially signed one, and that it is set as the default (not checked when `-Next` is an SDK). The root folder is deleted after the run |
+| upgrade | `items\upgrade.ps1` | Installs the previous release package into `PackageRoot` following the package manifests, creates a temporary instance and writes data, overlays the new package following "How to update", then checks boot, data, growing the disk, and that a normal boot installs the bridge automatically. When `-Next` is a package staging folder (with `components\modavd-ime.apk`), it also checks that the host IME came with the package, that the installed one is the officially signed one, and that it is set as the default (not checked when `-Next` is an SDK). Afterwards the temporary instance is deleted and the root folder stays on the new package |
 | yys | `items\yys.ps1` | *Onmyoji* cold-boots into the game and the frame rate is measured (instance 0 of the test root, bridge installed, already logged in); then MaaYYs (`items\maayys_run.py`) really fights Mitama battles |
 | ef-ab | `items\ef-ab.ps1` | *Arknights: Endfield* cold boots, alternating new and old builds; it measures only when the host is idle |
 
@@ -137,7 +138,7 @@ For the opt-in measurement of a newly created data disk and inode use before and
 
 | Item | Script | Notes |
 | --- | --- | --- |
-| ime-pkg | `items\ime-pkg.ps1` | `-Package <package staging folder>` (`release\ModAVD-<version>-win-x64`, read-only): copies it as a root folder and creates instance 9, checks that the officially signed IME is installed automatically on boot and set as the default, runs the 20 channel checks windowed, then checks that a development-signed IME is replaced by the officially signed one and that the steady state does not change. The root folder is deleted after the run, and the log is kept under `-Work` |
+| ime-pkg | `items\ime-pkg.ps1` | `-Package <package staging folder>` (`release\ModAVD-<version>-win-x64`, read-only): installs it into `PackageRoot` following the package manifests and creates temporary instance 9, checks that the officially signed IME is installed automatically on boot and set as the default, runs the 20 channel checks windowed, then checks that a development-signed IME is replaced by the officially signed one and that the steady state does not change. Afterwards the temporary instance is deleted, the root folder stays on this package, and the log is kept under `-Work` |
 
 ## When there is a dedicated test machine
 

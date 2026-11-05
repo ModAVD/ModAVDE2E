@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
 . "$PSScriptRoot\fps-baseline.ps1"
-$Root = Use-Local TestRoot $Root '-Root'
+$Root = Resolve-TestRoot (Use-Local TestRoot $Root '-Root')
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') 'regress-yys' }
 $MaaRun = Use-Local MaaYYs $MaaRun '-MaaRun'
 Add-Type -AssemblyName System.Drawing

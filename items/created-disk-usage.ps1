@@ -1,13 +1,14 @@
-# Opt-in measurement on a new, isolated root. Never added to the release suite.
+# Opt-in measurement on a new instance in an existing test root (E:\testbed\flow-a / flow-b): no new roots outside
+# the testbed (11-05). Never added to the release suite. -Work only holds the measurement state, it is not a root.
 param(
     [Parameter(Mandatory)][ValidateSet('Create','Baseline','Resume','Install','Sample','Stop')][string]$Action,
     [Parameter(Mandatory)][string]$Work,
+    # Create: the existing test root the instance goes into (local configuration TestRoot when not given); never the
+    # production root. Later actions take it from the measurement state.
+    [string]$Root,
+    # Create: the package the root must already be on (its modavd-manifest.json version); not installed by this script
     [string]$Package,
-    [string]$OfficialSdk,
-    [int]$PortBase = 27300,
-    [int]$AdbPort = 27383,
-    [int]$ScriptAdbPort = 27384,
-    [int]$Index = 0,
+    [int]$Index = 7,
     [ValidateRange(16,512)][int]$DataGB = 64,
     [string]$Apk,
     [string]$Game,
@@ -19,8 +20,14 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\common.ps1"
 . "$PSScriptRoot\disk-usage-lib.ps1"
 $Work = [IO.Path]::GetFullPath($Work)
-$Root = Join-Path $Work 'root'
+Assert-NotProduction $Work 'Work'
 $statePath = Join-Path $Work 'measurement.json'
+if ($Action -eq 'Create') {
+    $Root = Resolve-TestRoot (Use-Local TestRoot $Root '-Root') 'measurement root'
+} else {
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw 'No measurement state in Work' }
+    $Root = Resolve-TestRoot (Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json).root 'measurement root'
+}
 $exe = Join-Path $Root 'tools\modavd.exe'
 
 function Run-Modavd([string[]]$ArgsList) {
@@ -46,42 +53,24 @@ function Save-Data([string]$Label) {
 
 if ($Action -eq 'Create') {
     if (Test-Path -LiteralPath $Work) { throw "Work already exists: $Work" }
-    if (-not $Package -or -not $OfficialSdk) { throw 'Create requires -Package and -OfficialSdk' }
-    if ((Test-Inside $Work @($Package, $OfficialSdk)) -or (Test-Inside $Package @($Work)) -or (Test-Inside $OfficialSdk @($Work))) { throw 'Work, package and SDK must be separate directories' }
+    if ((Test-Inside $Work @($Root)) -or (Test-Inside $Root @($Work))) { throw 'Work and the test root must be separate directories' }
     if ($Index -lt 0 -or $Index -gt 9 -or $Index -eq 5) { throw 'Invalid instance index' }
-    if ($PortBase -lt 21000 -or $PortBase -gt 60000 -or $PortBase % 100 -ne 0) { throw 'Choose an isolated portBase, a multiple of 100 in 21000..60000' }
-    if ($AdbPort -eq $ScriptAdbPort -or $AdbPort -notin ($PortBase..($PortBase+99)) -or $ScriptAdbPort -notin ($PortBase..($PortBase+99))) { throw 'Choose two distinct adb ports in the isolated range' }
+    $cfg = Get-RootConfig $Root
+    if ((Test-Path -LiteralPath (Join-Path $Root "avd\mas_$Index.avd")) -or ($cfg.instances.PSObject.Properties.Name -contains "$Index")) { throw "Instance $Index already exists in $Root; pick a free -Index" }
+    $version = (Get-Content -Raw -LiteralPath (Join-Path $Root 'modavd-manifest.json') | ConvertFrom-Json).version
+    if ($Package) {
+        $want = (Get-Content -Raw -LiteralPath (Join-Path $Package 'modavd-manifest.json') | ConvertFrom-Json).version
+        if ($want -ne $version) { throw "The test root is on $version, not on the package's ${want}: install the package into it first (upgrade / ime-pkg do it with Install-Package)" }
+    }
+    $PortBase = Assert-ManagerPortBase $Root $exe
+    $AdbPort = [int]$cfg.adbServerPort; $ScriptAdbPort = [int]$cfg.scriptAdbServerPort
+    foreach ($p in $AdbPort, $ScriptAdbPort) { Assert-NotProductionPort $p 'test root adb port' }
     $instancePorts = ($PortBase + 10*$Index)..($PortBase + 10*$Index + 2)
-    if ($AdbPort -in $instancePorts -or $ScriptAdbPort -in $instancePorts) { throw 'adb port overlaps instance ports' }
-    $busy = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -in ($PortBase..($PortBase+99)))
-    if ($busy) { throw "Port range in use: $(($busy.LocalPort | Sort-Object -Unique) -join ', ')" }
-    foreach ($file in @('modavd-manifest.json','tools\modavd.exe','sdk\emulator\emulator.exe')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $Package $file) -PathType Leaf)) { throw "Missing package file: $file" }
-    }
-    foreach ($dir in @('platform-tools','system-images')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $OfficialSdk $dir) -PathType Container)) { throw "Missing SDK directory: $dir" }
-        if (Test-Path -LiteralPath (Join-Path $Package "sdk\$dir")) { throw "Package already has sdk\$dir" }
-    }
+    $busy = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -in $instancePorts)
+    if ($busy) { throw "Instance ports in use: $(($busy.LocalPort | Sort-Object -Unique) -join ', ')" }
     New-Item -ItemType Directory -Path $Work | Out-Null
-    & robocopy $Package $Root /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NP /NJH /NJS | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "Package copy failed: $LASTEXITCODE" }
-    $manifest = Get-Content -Raw -LiteralPath (Join-Path $Root 'modavd-manifest.json') | ConvertFrom-Json
-    if (-not $manifest.version -or -not $manifest.files) { throw 'Invalid package manifest' }
-    foreach ($entry in $manifest.files.PSObject.Properties) {
-        $file = Join-Path $Root $entry.Name
-        if (-not (Test-Inside $file @($Root)) -or -not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-FileHash -LiteralPath $file).Hash -ne $entry.Value.sha256) { throw "Package file missing or hash mismatch: $($entry.Name)" }
-    }
-    foreach ($dir in @('platform-tools','system-images')) {
-        & robocopy (Join-Path $OfficialSdk $dir) (Join-Path $Root "sdk\$dir") /E /COPY:DAT /R:2 /W:1 /NFL /NDL /NP /NJH /NJS | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "SDK copy failed: $LASTEXITCODE" }
-    }
-    @{ adbServerPort=$AdbPort; scriptAdbServerPort=$ScriptAdbPort; portBase=$PortBase } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Root 'mas-avd.json') -Encoding utf8
-    $state = [pscustomobject]@{ root=$Root; index=$Index; portBase=$PortBase; adbPort=$AdbPort; scriptAdbPort=$ScriptAdbPort; version=$manifest.version; dataGB=$DataGB; memory='4G'; cpu=4; bridge='default'; serial=''; createStarted=(Get-Date).ToString('o'); samples=@() }
-    Save-State
-    if ((Get-PortBase $Root $exe) -ne $PortBase) { throw 'Package does not use the requested portBase' }
-    $busy = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -in ($PortBase..($PortBase+99)))
-    if ($busy) { throw "Port range became busy while copying: $(($busy.LocalPort | Sort-Object -Unique) -join ', ')" }
-    Run-Modavd @('create','--index',"$Index",'--title','disk usage','--memory','4G','--cpu','4','--data-gb',"$DataGB")
+    $state = [pscustomobject]@{ root=$Root; index=$Index; portBase=$PortBase; adbPort=$AdbPort; scriptAdbPort=$ScriptAdbPort; version=$version; dataGB=$DataGB; memory='4G'; cpu=4; bridge='default'; serial=''; createStarted=(Get-Date).ToString('o'); samples=@() }
+    Save-State    Run-Modavd @('create','--index',"$Index",'--title','disk usage','--memory','4G','--cpu','4','--data-gb',"$DataGB")
     $state | Add-Member -NotePropertyName createFinished -NotePropertyValue (Get-Date).ToString('o')
     $state.serial = (Assert-InstancePorts $Index $PortBase $Root $exe).Serial
     Save-State
@@ -93,9 +82,8 @@ if ($Action -eq 'Create') {
     Run-Modavd @('start',"$Index",'--window')
     Save-Data 'before-install'
     if ($state.samples[-1].inodes.total -ne 1048576) { throw 'This instance does not have the expected inode cap' }
-    Write-Host "Created isolated root. Continue with Install using -Work '$Work'."
+    Write-Host "Created instance $Index in $Root. Continue with Install using -Work '$Work'; afterwards remove it with modavd delete $Index."
 } else {
-    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw 'No measurement state in Work' }
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     if ($state.root -ne $Root -or -not $state.serial) { throw 'Measurement root or serial does not match' }
     $cfg = Get-RootConfig $Root

@@ -50,6 +50,54 @@ function Set-RootSdk([string]$Root, [string]$Sdk) {
 
 function Get-RootConfig([string]$Root) { Get-Content -LiteralPath (Join-Path $Root 'mas-avd.json') -Raw | ConvertFrom-Json }
 
+# 测试根：已有的 ModAVD 根目录（E:\testbed 下的 flow-a / flow-b），回归只在里面建临时实例，不新建根目录（11-05 用户定：
+# testbed 里只有三组模拟器，不可以去别的地方新建）。生产根目录和生产的 adb 端口一律拒绝。返回完整路径。
+function Resolve-TestRoot([string]$Root, [string]$What = '测试根') {
+    if (-not $Root) { throw "没有$What：给 -Root，或者写进本机配置 TestRoot / PackageRoot（E:\testbed 下已有的根目录）" }
+    $full = [IO.Path]::GetFullPath($Root)
+    Assert-NotProduction $full $What
+    if (-not (Test-Path -LiteralPath (Join-Path $full 'mas-avd.json') -PathType Leaf)) {
+        throw "$What $full 没有 mas-avd.json：回归只用已有的测试根（E:\testbed 下的 flow-a / flow-b），不新建根目录"
+    }
+    $cfg = Get-RootConfig $full
+    foreach ($k in 'adbServerPort', 'scriptAdbServerPort') {
+        if ($cfg.PSObject.Properties.Name -contains $k -and $cfg.$k) { Assert-NotProductionPort ([int]$cfg.$k) "$What 的 $k" }
+    }
+    $full
+}
+
+# 包根清单（modavd-manifest.json）列的文件，相对路径；没有清单、读不出、没有 files 时返回 $null（不知道包里有哪些文件）
+function Get-ManifestFiles([string]$Dir) {
+    $m = Join-Path $Dir 'modavd-manifest.json'
+    if (-not (Test-Path -LiteralPath $m -PathType Leaf)) { return $null }
+    try { $files = (Get-Content -LiteralPath $m -Raw | ConvertFrom-Json -ErrorAction Stop).files } catch { return $null }
+    if ($null -eq $files) { return $null }
+    @($files.PSObject.Properties.Name)
+}
+
+# 换包时要先删的：$Current（根目录现在的清单）有、$Next（要装的包的清单）没有的文件。只会是包里的文件，不会是实例、日志这些。
+function Get-StalePackageFiles($Current, $Next) {
+    @(@($Current) | Where-Object { $_ -and @($Next) -notcontains $_ })
+}
+
+# 把组包目录 $From 装进测试根 $Root（「怎么更新」那样整个覆盖），装哪一版都行（升级测试先装回上一版）：
+# 先删掉根目录现在的包里有、$From 里没有的文件（按两边的 modavd-manifest.json），再整个覆盖。avd、logs、mas-avd.json 这些
+# 不在清单里的不动。$From 的清单认不出（早年的包没有清单）时不知道该删哪些，只覆盖。返回删掉的文件。
+function Install-Package([string]$From, [string]$Root) {
+    Assert-NotProduction $Root '要换包的根目录'
+    $fromFiles = Get-ManifestFiles $From
+    $stale = if ($null -ne $fromFiles) { Get-StalePackageFiles (Get-ManifestFiles $Root) $fromFiles } else { @() }
+    foreach ($rel in $stale) {
+        if ([IO.Path]::IsPathRooted($rel) -or $rel -match '(^|[\\/])\.\.([\\/]|$)') { throw "清单里的路径不对：$rel" }
+        $p = Join-Path $Root $rel
+        if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
+    }
+    & robocopy $From $Root /E /COPY:DAT /R:5 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy $From -> $Root 失败（$LASTEXITCODE）" }
+    $global:LASTEXITCODE = 0
+    $stale
+}
+
 # modavd <参数...>，输出逐行返回，退出码在 $LASTEXITCODE
 function M { & (Join-Path $script:Root 'tools\modavd.exe') --root $script:Root @args 2>&1 | ForEach-Object { "$_" } }
 

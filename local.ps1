@@ -43,3 +43,26 @@ function Test-Inside([string]$Path, [string[]]$Roots) {
     }
     return $null
 }
+
+# 生产：AUTO-MAS 在用的 ModAVD 根目录（本机配置 ProductionRoots，默认 D:\ModAVD）和它占着的 adb server 端口。
+# 测试只读不写：测试根、回归输出、工作目录落在生产根目录下面，或者用到这几个端口，就停。
+# 测试数据都在别的盘（E:\testbed 等），不再用「只许某个目录」的白名单，而是明确拒绝生产。
+$script:ProductionAdbPorts = @(5037, 20049, 20050)
+function Get-ProductionRoots {
+    $v = @(Use-Local ProductionRoots $null '' -Optional | Where-Object { $_ })
+    if ($v.Count) { $v } else { @('D:\ModAVD') }
+}
+# 不分大小写，\ 和 / 都算分隔符（CI 在 Linux 上跑测试，D:\ 写法的路径也要比得出来）
+function Test-UnderPath([string]$Path, [string]$Root) {
+    $norm = { param($x) ([IO.Path]::GetFullPath($x) -replace '[\\/]+', '/').TrimEnd('/').ToLowerInvariant() }
+    $p = & $norm $Path; $r = & $norm $Root
+    $p -eq $r -or $p.StartsWith($r + '/')
+}
+function Assert-NotProduction([string]$Path, [string]$What) {
+    foreach ($r in Get-ProductionRoots) {
+        if (Test-UnderPath $Path $r) { throw "$What 在生产根目录 $r 下（$Path）：测试不碰生产" }
+    }
+}
+function Assert-NotProductionPort([int]$Port, [string]$What) {
+    if ($Port -in $script:ProductionAdbPorts) { throw "$What 是 $Port，是生产在用的 adb 端口（$($script:ProductionAdbPorts -join '、')）" }
+}

@@ -13,7 +13,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\common.ps1"
-$Root = Use-Local TestRoot $Root '-Root'
+$Root = Resolve-TestRoot (Use-Local TestRoot $Root '-Root')
 $script:Root = $Root; $script:Index = $Index
 $problems = @(); $notes = @(); $created = $false
 $marker = Join-Path $Root "avd\mas_$Index.avd\modavd-writable-system"

@@ -3,7 +3,9 @@
 # 占位符：{Sdk} {Baseline} {Label} {Out} {ItemOut} {Repo}，{Local:<键名>} 取本机配置。每项字段见 README.md。
 # 用到的测试机（都是测试数据，不是生产；位置在本机配置里）：
 #   mas_6 / mas_7 / endfield：GameAvdHome（体检、明日方舟、1999、终末地）；gfx_t2：SrAvdHome（星铁）；
-#   imesmoke：ImeAvdHome（输入法）；TestRoot 的 0 号（阴阳师，已装桥、已登录）和临时新建的 3、6、7 号。
+#   imesmoke：ImeAvdHome（输入法）；TestRoot 的 0 号（阴阳师，已装桥、已登录）和临时新建的 3、6、7 号；
+#   PackageRoot（没有就 TestRoot）里临时新建的 8、9 号（upgrade、ime-pkg）。11-05 起不新建根目录：都是 E:\testbed 下已有的根，
+#   生产根目录（ProductionRoots，默认 D:\ModAVD）一律拒绝。
 @{
     Avds  = @('mas_0', 'mas_3', 'mas_4', 'mas_6', 'mas_7', 'gfx_t2', 'imesmoke', 'endfield')
     Scopes = @{

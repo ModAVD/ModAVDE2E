@@ -66,7 +66,9 @@ try {
         $prev = Join-Path $base 'previous package'
         $next = Join-Path $base 'next package'
         $work = Join-Path $base 'work'
-        $official = Join-Path $base 'official sdk'
+        # 已有的测试根（11-05 起升级测试不新建根目录，在已有的根上装回上一版再升级）
+        $testRoot = Join-Path $base 'test root'
+        Put (Join-Path $testRoot 'mas-avd.json') '{"portBase": 23000, "adbServerPort": 23099, "scriptAdbServerPort": 23098, "instances": {}}'
         $oldId = if ($case.OldId) { $case.OldId } else { 'mas-37' }
         foreach ($pkg in $prev, $next) {
             Put (Join-Path $pkg 'sdk\emulator\emulator.exe') 'fixture'
@@ -79,7 +81,7 @@ try {
         Manifest $next $case.New $case.NewRaw
         $env:MODAVD_REGRESS_PACKAGE = Join-Path $next 'tools'
         $fixture = @{ Script = ''; Tag = ''; Starts = 0; Stops = 0 }
-        foreach ($exe in (Join-Path $work 'cli\modavd.exe'), (Join-Path $work 'root\tools\modavd.exe')) {
+        foreach ($exe in (Join-Path $work 'cli\modavd.exe'), (Join-Path $testRoot 'tools\modavd.exe')) {
             MockCommand $exe {
                 $global:LASTEXITCODE = 0
                 if ($args[2] -eq '--json') {
@@ -90,9 +92,7 @@ try {
                 if ($args[2] -eq 'stop') { $fixture.Stops++ }
             }
         }
-        $null = New-Item -ItemType Directory -Force (Join-Path $official 'system-images')
-        Put (Join-Path $official 'platform-tools\adb.exe') 'fixture'
-        foreach ($exe in (Join-Path $official 'platform-tools\adb.exe'), (Join-Path $work 'root\sdk\platform-tools\adb.exe')) {
+        foreach ($exe in @(Join-Path $testRoot 'sdk\platform-tools\adb.exe')) {
             MockCommand $exe {
                 $global:LASTEXITCODE = 0
                 if ($args -contains 'push') {
@@ -109,7 +109,7 @@ try {
         function global:Get-CimInstance { @() }
         $nextArg = if ($case.Sdk) { Join-Path $next 'sdk' } else { $next }
         if ($case.Sdk -and $case.New) { Manifest $nextArg $case.New '' }
-        $output = @(& $item -Prev $prev -Next $nextArg -ModavdOut $next -Work $work -Official $official -Keep)
+        $output = @(& $item -Prev $prev -Next $nextArg -ModavdOut $next -Root $testRoot -Work $work -Index 4 -Keep)
         $rows = @($output | Where-Object { $_ -like 'REGRESS-RESULT *' })
         Check ($rows.Count -eq 1) "$($case.Name): one result"
         $result = $rows[-1].Substring('REGRESS-RESULT '.Length) | ConvertFrom-Json

@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
-$Root = Use-Local TestRoot $Root '-Root'
+$Root = Resolve-TestRoot (Use-Local TestRoot $Root '-Root')
 
 function DataFacts {
     $o = Su 'df -i /data | tail -n 1; df -k /data | tail -n 1'

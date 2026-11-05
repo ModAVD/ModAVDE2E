@@ -25,7 +25,7 @@ param(
     [string]$Baseline,
     # 默认取 SDK 的 Pkg.BuildId（mas-36 -> mas36）
     [string]$Label,
-    # 默认 <TempRoot>\regress-<Label>-<时间>；本机配置有 TempRoot 时必须在它下面
+    # 默认 <TempRoot>\regress-<Label>-<时间>；不能在生产根目录（本机配置 ProductionRoots，默认 D:\ModAVD）下
     [string]$Out,
     # 这一版改了什么（套件 Scopes 里的名字）
     [string[]]$Scope,
@@ -65,11 +65,15 @@ if (-not $Label) {
     $Label = $id -replace '-', ''
 }
 $suiteData = Import-PowerShellDataFile -LiteralPath $Suite
-# 临时数据只放临时目录：本机配置有 TempRoot 时输出必须在它下面
-$tempRoot = Use-Local TempRoot $null '' -Optional
+# 输出默认放临时目录（本机配置 TempRoot）；放哪都行，只是不能在生产根目录下（不用白名单，明确拒绝生产）
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') "regress-$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
 $Out = [IO.Path]::GetFullPath($Out)
-if ($tempRoot -and -not (Test-Inside $Out @($tempRoot))) { throw "输出要在临时目录 $tempRoot（本机配置 TempRoot）下面：$Out" }
+Assert-NotProduction $Out '回归输出'
+# 本机配置的测试根（实例都建在它们里面，不新建根目录）：开跑前就核，不等到哪一项才停
+foreach ($key in 'TestRoot', 'PackageRoot') {
+    $configured = Use-Local $key $null '' -Optional
+    if ($configured) { Assert-NotProduction $configured "本机配置的 $key" }
+}
 
 $items = @($suiteData.Items)
 $ids = $items | ForEach-Object { $_.Id }
@@ -395,9 +399,10 @@ foreach ($it in $items) {
     if (-not (WaitRes $it)) { $r.status = '跳过'; $r.summary = '资源一直不够'; L "[$($it.Id)] 跳过：资源一直不够"; $results.Add([pscustomobject]$r); continue }
     # Item arguments can override the local configuration's root/AVD home.
     $itemRoot = Use-Local TestRoot $null '' -Optional
-    $itemHomes = @(foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
+    $itemHomes = @(foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome', 'PackageRoot') {
             $value = Use-Local $key $null '' -Optional
-            if ($value) { $value }
+            # PackageRoot 是根目录，实例在它的 avd 下
+            if ($value) { if ($key -eq 'PackageRoot') { Join-Path $value 'avd' } else { $value } }
         })
     for ($i = 0; $i -lt $argv.Count - 1; $i++) {
         switch ($argv[$i]) {
