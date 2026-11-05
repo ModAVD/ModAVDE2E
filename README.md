@@ -49,8 +49,8 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 项目自己的输出 `<项>\`、总日志 `regress.log`、`results.json` 和 `results.md`。有一项不是「通过」，退出码就是 1。
 日志开头记下测的是哪一版：管理器命令行的哈希、随包脚本所在仓库的提交、本仓库的提交。
 
-`-Manager` 是放着 `tools\modavd.exe` 和 `ModAVD.exe` 的目录（ModAVDManager 的 `build.ps1 -Out`，或解开的 Release 包），发版回归用要随包发的那一版；
-`-PackageScripts` 是 ModAVD 仓库的 `package\`，发版回归用发版克隆里的那份。两个都能写进本机配置。
+`-Manager` 是放着 `tools\modavd.exe` 和 `ModAVD.exe` 的目录（ModAVDManager 的 `build.ps1 -Out`，或解开的 Release 包），发版回归用要随包发的那一版。**必须给**，不从本机配置取：旧版管理器不认测试根 `mas-avd.json` 的 `portBase`，会把测试根的实例开到生产的 20000 段上。单独跑某一项时设环境变量 `MODAVD_REGRESS_MANAGER`。开测试根的实例之前，各项会先跑 `modavd list --json` 核对：要有 `port_base`（ModAVDManager 0.3.1 起），和 `portBase` 一致，且不是 20000。
+`-PackageScripts` 是 ModAVD 仓库的 `package\`，发版回归用发版克隆里的那份，能写进本机配置。
 
 ## 本机配置
 
@@ -62,7 +62,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | 键 | 是什么 | 谁用 |
 | --- | --- | --- |
 | `TempRoot` | 临时输出的根目录 | 运行器、各项 |
-| `Manager` | 放着 `tools\modavd.exe`、`ModAVD.exe` 的目录 | 运行器、各项 |
+| `GamePorts` | 游戏实例的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096，写成 `@{ sr = 20130 }` 覆盖；落在生产的 20000–20049 或碰 5037、20049、20050 就报错停下 | game-real |
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
 | `TestRoot` | 测试用的 ModAVD 根目录（私有 adb 端口，同机有生产根目录时设 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删） | bridge、bridge-default、datadisk、yys |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |

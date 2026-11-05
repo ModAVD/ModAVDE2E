@@ -49,8 +49,8 @@ By default the output goes to `<TempRoot>\regress-<build>-<time>\` (when the loc
 the item's own output `<item>\`, the overall log `regress.log`, `results.json` and `results.md`. If any item is not "passed", the exit code is 1.
 The start of the log records which build was tested: the hash of the manager's CLI, the commit of the repository that holds the bundled scripts, and the commit of this repository.
 
-`-Manager` is the folder that holds `tools\modavd.exe` and `ModAVD.exe` (the `build.ps1 -Out` of ModAVDManager, or an unpacked release package). For the release regression, use the build that is going to ship in the package.
-`-PackageScripts` is the `package\` of the ModAVD repository; for the release regression, use the one in the release clone. Both can go into the local configuration.
+`-Manager` is the folder that holds `tools\modavd.exe` and `ModAVD.exe` (the `build.ps1 -Out` of ModAVDManager, or an unpacked release package). For the release regression, use the build that is going to ship in the package. It is **required** and is not read from the local configuration: an old manager does not know the `portBase` in the test root's `mas-avd.json` and would start the test root's instances on the production 20000 range. When running a single item on its own, set the environment variable `MODAVD_REGRESS_MANAGER`. Before starting an instance of the test root, the items run `modavd list --json` and check that `port_base` exists (ModAVDManager 0.3.1 and later), matches `portBase`, and is not 20000.
+`-PackageScripts` is the `package\` of the ModAVD repository; for the release regression, use the one in the release clone. It can go into the local configuration.
 
 ## Local configuration
 
@@ -62,7 +62,7 @@ The suite refers to keys with `{Local:<key>}`, and the item scripts take their d
 | Key | What it is | Used by |
 | --- | --- | --- |
 | `TempRoot` | The root folder for temporary output | runner, all items |
-| `Manager` | The folder that holds `tools\modavd.exe` and `ModAVD.exe` | runner, all items |
+| `GamePorts` | The console ports of the game instances; defaults are ark 20072, r1999 20100, sr 20120, ef 20096; override with `@{ sr = 20130 }`. A port inside the production 20000-20049 range, or touching 5037, 20049 or 20050, stops with an error | game-real |
 | `PackageScripts` | The `package\` of the ModAVD repository (the bridge install script `modavd-bridge.ps1` is in it) | runner, bridge, upgrade, game-real |
 | `TestRoot` | The ModAVD root folder used for testing (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
 | `PrevPackage` | The package staging folder of the previous production version (a fixed copy) | upgrade |

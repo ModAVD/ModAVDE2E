@@ -168,7 +168,6 @@ try {
     [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $ScriptAdbPort$pb`n}`n", [Text.UTF8Encoding]::new($false))
     # 实例的端口按包里的 modavd 用的端口段算：新建时就要无头开一次机，开之前先看端口
     $base = Resolve-PortBase $root $cliExe $PortBase
-    if ($PortBase -and $base -ne $PortBase) { $notes += '包里的 modavd 还不认 portBase，实例在 20000 段上' }
     $consolePort = $base + 10 * $Index
     $mine = $consolePort..($consolePort + 2)
     foreach ($p in $AdbPort, $ScriptAdbPort) {

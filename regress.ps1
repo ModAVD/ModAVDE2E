@@ -31,8 +31,8 @@ param(
     [string[]]$Scope,
     [string[]]$Only,
     [string[]]$Skip,
-    # 管理器：放着 tools\modavd.exe 和 ModAVD.exe 的目录（ModAVDManager 的 build.ps1 -Out，或解开的 Release 包；
-    # 本机配置 Manager）；发版回归用要随包发的那一版。随包脚本：ModAVD 仓库的 package\（本机配置 PackageScripts），
+    # 管理器：必须给，放着 tools\modavd.exe 和 ModAVD.exe 的目录（ModAVDManager 的 build.ps1 -Out，或解开的 Release 包），
+    # 不从本机配置取：回归用的就是要随包发的那一版，拿本机留着的旧版会让测试根的实例开到生产的端口段上。随包脚本：ModAVD 仓库的 package\（本机配置 PackageScripts），
     # 发版回归用发版克隆里的那份。两个都经环境变量（MODAVD_REGRESS_MANAGER / MODAVD_REGRESS_PACKAGE）传给各项，见 items\common.ps1
     [string]$Manager,
     [string]$PackageScripts,
@@ -42,7 +42,8 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . (Join-Path $PSScriptRoot 'local.ps1')
 $Repo = $PSScriptRoot
-$Manager = (Resolve-Path (Use-Local Manager $Manager '-Manager')).Path
+if (-not $Manager) { throw '没给 -Manager：要传发版用的那个管理器目录（放着 tools\modavd.exe 和 ModAVD.exe，即解开的 ModAVDManager Release 包或 build.ps1 -Out）。不从本机配置取，旧版管理器不认 portBase，会把测试根的实例开到生产的 20000 段上' }
+$Manager = (Resolve-Path $Manager).Path
 $PackageScripts = (Resolve-Path (Use-Local PackageScripts $PackageScripts '-PackageScripts')).Path
 foreach ($f in (Join-Path $Manager 'tools\modavd.exe'), (Join-Path $Manager 'ModAVD.exe'), (Join-Path $PackageScripts 'modavd-bridge.ps1')) {
     if (-not (Test-Path -LiteralPath $f)) { throw "没有 $f（-Manager / -PackageScripts）" }

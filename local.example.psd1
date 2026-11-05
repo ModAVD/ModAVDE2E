@@ -6,8 +6,8 @@
     TempRoot     = ''
 
     # ---- 被测的东西
-    # 放着 tools\modavd.exe 和 ModAVD.exe 的目录（ModAVDManager 的 build.ps1 -Out，或解开的 Release 包）
-    Manager      = ''
+    # 管理器（放着 tools\modavd.exe 和 ModAVD.exe 的目录）不在这里配：regress.ps1 必须传 -Manager，单独跑某一项时设环境变量
+    # MODAVD_REGRESS_MANAGER。本机留一份旧管理器在配置里，会让不认 portBase 的版本把测试根的实例开到生产的 20000 段上。
     # ModAVD 仓库的 package\（随包脚本，装桥脚本 modavd-bridge.ps1 在里面）；发版回归用发版克隆里的那份
     PackageScripts = ''
     # 上一个生产版的组包目录（升级项的起点，放一份固定副本）
@@ -20,6 +20,9 @@
     # 其余编号由各项临时建、跑完删）
     TestRoot     = ''
     # 游戏实例 mas_6 / mas_7 / endfield、星铁实例 gfx_t2、输入法冒烟机 imesmoke 的 ANDROID_AVD_HOME
+    # 游戏实例（game-real）的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096；要改写成 @{ sr = 20130 } 这样，
+    # 只写要改的游戏。端口和它 +1、+2（adb、gRPC）不能落在生产的 20000–20049 上，也不能是 5037、20049、20050，否则报错停下
+    GamePorts    = @{}
     GameAvdHome  = ''
     SrAvdHome    = ''
     ImeAvdHome   = ''

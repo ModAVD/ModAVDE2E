@@ -36,6 +36,7 @@ $ErrorActionPreference = 'Stop'
 if ($AdbPort -in 5037, 20049, 20050) { throw "adb 端口 $AdbPort 是生产在用的" }
 . (Join-Path $PSScriptRoot '..\local.ps1')
 . (Join-Path $PSScriptRoot 'fps-baseline.ps1')
+. (Join-Path $PSScriptRoot 'port-guard.ps1')
 # 这一项真跑时要的仓库外的东西（-ReJudge 只重新判，都不要）；没配就在这里停
 $need = if ($ReJudge) { @() } else {
     @('Launcher', 'Monitor', 'VulkanFixLib', 'PackageScripts') + @{ ark = @('Kit', 'GameAvdHome'); r1999 = @('Kit', 'GameAvdHome')
@@ -51,9 +52,13 @@ $root1 = Need GameAvdHome
 $cfg = @{
     ark   = @{ Avd = 'mas_6'; Port = 20072; AvdHome = $root1; Memory = 4096; Cores = 4; Pkg = 'com.hypergryph.arknights' }
     r1999 = @{ Avd = 'mas_7'; Port = 20100; AvdHome = $root1; Memory = 6144; Cores = 6; Pkg = 'com.shenlan.m.reverse1999' }
-    sr    = @{ Avd = 'gfx_t2'; Port = 20040; AvdHome = (Need SrAvdHome); Memory = 6144; Cores = 8; Pkg = 'com.miHoYo.hkrpg'; WcAsCached = $true }
+    sr    = @{ Avd = 'gfx_t2'; Port = 20120; AvdHome = (Need SrAvdHome); Memory = 6144; Cores = 8; Pkg = 'com.miHoYo.hkrpg'; WcAsCached = $true }
     ef    = @{ Avd = 'endfield'; Port = 20096; AvdHome = $root1; Memory = 8192; Cores = 6; Pkg = 'com.hypergryph.endfield' }
 }[$Game]
+# 控制台端口可以用本机配置 GamePorts 覆盖（比如 @{ sr = 20120 }）；不管哪来的，都不许落在生产的端口上
+$gamePorts = Use-Local GamePorts $null '' -Optional
+if ($gamePorts -is [System.Collections.IDictionary] -and $gamePorts.Contains($Game)) { $cfg.Port = [int]$gamePorts[$Game] }
+if (-not $ReJudge) { Assert-GameConsolePort $cfg.Port "游戏 $Game" }
 $serial = "emulator-$($cfg.Port)"
 $adbExe = Join-Path $Sdk 'platform-tools\adb.exe'
 $payload = Join-Path $Sdk 'emulator\resources\modavd'

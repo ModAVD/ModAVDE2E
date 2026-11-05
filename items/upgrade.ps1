@@ -21,7 +21,7 @@ param(
     [Parameter(Mandatory)][string]$Next,
     # 上一版的组包目录：只测生产现在跑的那一版（本机配置 PrevPackage）
     [string]$Prev,
-    # 放着 tools\modavd.exe 和 ModAVD.exe 的目录；默认取 common.ps1 的管理器目录
+    # 放着 tools\modavd.exe 和 ModAVD.exe 的目录；默认取 common.ps1 的管理器目录（环境变量 MODAVD_REGRESS_MANAGER）
     [string]$ModavdOut,
     # 默认 <TempRoot>\regress-upgrade
     [string]$Work,
@@ -42,7 +42,7 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
 $Prev = Use-Local PrevPackage $Prev '-Prev'
-if (-not $ModavdOut) { $ModavdOut = Use-Local Manager $script:ManagerDir '-ModavdOut' }
+if (-not $ModavdOut) { $ModavdOut = Get-ManagerDir }
 if (-not $Work) { $Work = Join-Path (Use-Local TempRoot $null '-Work') 'regress-upgrade' }
 $Official = Use-Local OfficialSdk $Official '-Official'
 $root = Join-Path $Work 'root'
@@ -117,7 +117,6 @@ try {
     $oldId = BuildId (Join-Path $root 'sdk\emulator')
     $oldVersion = PackageVersion $root
     $base = Resolve-PortBase $root $script:CliExe $PortBase
-    if ($PortBase -and $base -ne $PortBase) { $notes += '这版 modavd 还不认 portBase，实例在 20000 段上' }
     Say "上一版根目录 $root（$oldId，端口段 $base）"
 
     $o = Modavd create --index $Index --title 升级测试 --memory 4G --cpu 4
