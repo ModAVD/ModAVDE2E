@@ -35,5 +35,8 @@ jobs:
           if ($bad) { exit 1 }
       - name: Compile the Python helpers
         run: python3 -m py_compile items/maayys_run.py
+      - name: Check disk usage parsing and install safeguards
+        shell: pwsh
+        run: ./tests/created-disk-usage.ps1
       - name: Scan tracked files for private identity and paths
         run: python3 .modavd/scripts/privacy.py .

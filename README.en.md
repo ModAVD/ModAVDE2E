@@ -131,6 +131,8 @@ In the game UI, do only fixed operations such as "launch" and "tap Enter Game". 
 
 Not in the suite; run separately after packaging:
 
+For the opt-in measurement of a newly created data disk and inode use before and after installing a game, see [the measurement procedure](docs/created-disk-usage.md).
+
 | Item | Script | Notes |
 | --- | --- | --- |
 | ime-pkg | `items\ime-pkg.ps1` | `-Package <package staging folder>` (`release\ModAVD-<version>-win-x64`, read-only): copies it as a root folder and creates instance 9, checks that the officially signed IME is installed automatically on boot and set as the default, runs the 20 channel checks windowed, then checks that a development-signed IME is replaced by the officially signed one and that the steady state does not change. The root folder is deleted after the run, and the log is kept under `-Work` |
