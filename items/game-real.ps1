@@ -71,7 +71,8 @@ $packageScripts = Need PackageScripts $env:MODAVD_REGRESS_PACKAGE
 $bridgeScript = if ($packageScripts) { Join-Path $packageScripts 'modavd-bridge.ps1' }
 $monitor = Need Monitor
 $launcher = Need Launcher
-$db = Join-Path $env:LOCALAPPDATA 'Temp\AndroidEmulator'
+# 模拟器的崩溃转储目录；-ReJudge 用不到，没有 LOCALAPPDATA（CI 的 Linux）时也不出错
+$db = [IO.Path]::Combine([string]$env:LOCALAPPDATA, 'Temp', 'AndroidEmulator')
 New-Item -ItemType Directory -Force $Out | Out-Null
 $log = Join-Path $Out 'game-real.log'
 
