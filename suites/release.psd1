@@ -18,6 +18,8 @@
     PostPackage = @{
         'upgrade -Next <组包目录>' = @('emulator', 'bridge', 'manager', 'ime', 'scripts', 'repack')
         'ime-pkg -Package <组包目录>' = @('emulator', 'manager', 'ime', 'repack')
+        # 新根目录从空补全组件（命令行和「补全组件.bat」两条路），不开模拟器；0.37.0–0.38.0 的批处理装系统镜像必然失败，以前没测出来
+        'fetch -Package <组包目录>' = @('emulator', 'bridge', 'manager', 'ime', 'scripts', 'repack')
     }
     Items = @(
         @{
