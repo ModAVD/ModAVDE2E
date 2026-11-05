@@ -14,6 +14,8 @@
     PrevPackage  = ''
     # 官方 SDK（platform-tools、system-images），新搭的根目录链到它，代替「补全组件」的下载
     OfficialSdk  = ''
+    # 补全组件的两个 zip（platform-tools_r37.0.1-win.zip、x86_64-34_r14.zip）放在哪个目录；可以不写，fetch 项就从网上下载一次
+    ComponentCache = ''
 
     # ---- 测试机
     # 测试用的 ModAVD 根目录（私有 adb 端口，同机有生产根目录时 mas-avd.json 设 portBase；0 号已装桥、登着测试号，
