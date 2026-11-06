@@ -16,7 +16,8 @@ function Throws([scriptblock]$Block) { try { & $Block | Out-Null } catch { retur
 # 目录里的每个文件（路径、长度、修改时间、内容哈希）。不比目录本身的修改时间：刚写完文件时系统会稍后再刷新它
 # 子进程的输出拼成一行：报错按控制台宽度折行，续行带「     | 」前缀，长路径会把「在生产根目录 … 下」拆到两行
 # （折行处的空格会被吃掉，所以下面的正则写「在生产根目录\s*」）
-function Join-Output($Lines) { ((@($Lines) | ForEach-Object { "$_" }) -join "`n") -replace '\r?\n\s*\|\s?', '' }
+# CI（Linux）上报错还带 ANSI 颜色码，夹在字中间，先去掉
+function Join-Output($Lines) { (((@($Lines) | ForEach-Object { "$_" }) -join "`n") -replace '\x1b\[[0-9;?]*[A-Za-z]', '') -replace '\r?\n\s*\|\s?', '' }
 function Snapshot([string]$Dir) { (Get-ChildItem -LiteralPath $Dir -Recurse -Force -File | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$((Get-FileHash -LiteralPath $_.FullName).Hash)" } | Sort-Object) -join "`n" }
 
 $temp = [IO.Path]::GetTempPath()
@@ -31,6 +32,10 @@ $env:MODAVD_REGRESS_MANAGER = Join-Path $work 'no-manager'
 $env:MODAVD_REGRESS_PACKAGE = Join-Path $work 'no-package'
 try {
     . (Join-Path $PSScriptRoot '..\items\common.ps1')
+    # 拼输出的小工具本身：折行的续行前缀、颜色码都去掉
+    $esc = [char]27
+    Check ((Join-Output @("A 在生产根目录", "     | X 下")) -eq 'A 在生产根目录X 下') 'Join-Output 要去掉续行前缀'
+    Check ((Join-Output @("${esc}[31;1mA ${esc}[0m在生产根目录", "${esc}[36;1m     | ${esc}[31;1mX 下${esc}[0m")) -eq 'A 在生产根目录X 下') 'Join-Output 要去掉颜色码'
 
     # ---- 默认的生产根目录 D:\ModAVD：只比字符串。不分大小写，\ 和 / 都认，下面的目录也算
     foreach ($bad in 'D:\ModAVD', 'd:\modavd\avd\mas_1.avd', 'D:/ModAVD/tools', 'D:\ModAVD\') {
