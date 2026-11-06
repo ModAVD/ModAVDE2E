@@ -38,7 +38,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 
 **改了什么跑什么**：套件顶上的 `Scopes` 列出改动范围（`emulator`、`bridge`、`manager`、`ime`、
 `scripts`、`repack`），每项的 `Scopes` 写它管哪些范围；`-Scope` 跑和它有交集的项。套件有范围时必须给 `-Scope` 或 `-Only`。
-`PostPackage` 列打完包要用组包目录补跑的（升级、`ime-pkg`），运行器最后按范围提示。先 `-DryRun` 看会跑哪些项、用到哪些本机配置。
+`PostPackage` 列打完包要用组包目录补跑的（升级、`ime-pkg`、`fetch`），运行器最后按范围提示。先 `-DryRun` 看会跑哪些项、用到哪些本机配置。
 
 **游戏项帧率**：`items\game-real.ps1` 默认只跑装桥那一轮，帧率中位数和 `baselines\fps.json`（上一个生产版的数，每个游戏有容差）比；
 `items\yys.ps1` 的庭院和每场战斗也和它比（`yys-courtyard`、`yys-battle`）。同机别的模拟器多于 2 个时只记录不判。
@@ -70,6 +70,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（私有 adb 端口、`portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）就停，不新建 | bridge、bridge-default、datadisk、yys |
 | `PackageRoot` | 装包类的项用的测试根（不写就用 `TestRoot`）：先装成要测的包，测完根目录停在新包上 | upgrade、ime-pkg |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |
+| `ComponentCache` | 放着 `platform-tools_r37.0.1-win.zip`、`x86_64-34_r14.zip` 的目录（可以没有：没有就从网上下载一次） | fetch |
 | `Launcher` | 启动器 `avd-p0.ps1`（无头 / 带窗口开 AVD，带 `-AdbPort`、`-VulkanFix` 等参数） | game-real、ime |
 | `Monitor` | 采样脚本 `emu_monitor.py`（30 秒一行：帧率、重启、崩溃、ANR、Vulkan 报错） | game-real |
 | `VulkanFixLib` | 客体 Vulkan 修复库 | game-real |
@@ -139,6 +140,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 | 项 | 脚本 | 说明 |
 | --- | --- | --- |
 | ime-pkg | `items\ime-pkg.ps1` | `-Package <组包目录>`（`release\ModAVD-<版本>-win-x64`，只读）：按包根清单装进 `PackageRoot`、新建 9 号临时实例，核对正式签名的输入法开机自动装好、设为默认，带窗口跑通道 20 项，再核对开发签名的换成正式签名、稳态不变；跑完删临时实例，根目录停在这个包上，日志留在 `-Work` 下 |
+| fetch | `items\fetch.ps1` | `-Package <组包目录>`（只读）：搭两个只够补全组件用的新根目录，一个跑 `tools\modavd.exe components fetch`，一个用重定向的输入跑「补全组件.bat」（新版先选下载源，回车是自动；再同意许可协议），两样都要装好，再跑一次 `fetch` 都算齐全；新版批处理还要把下载源记成 `auto`。只有取许可协议清单要联网，`-Cache`（本机配置 `ComponentCache`）给了放着两个 zip 的目录时不下载，没给时命令行那遍下载一次、批处理那遍用它留下的 zip；不开模拟器；根目录跑完删掉 |
 
 ## 以后有了专门跑测试的机器
 

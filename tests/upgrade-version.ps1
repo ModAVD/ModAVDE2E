@@ -51,8 +51,13 @@ try {
         @{ Name = 'missing new manifest, same build'; Old = 'v0.37.0'; Pass = $false; Fallback = $true; Problem = '构建号还是' }
         @{ Name = 'both manifests missing'; OldId = 'mas-36'; Pass = $true; Fallback = $true }
         @{ Name = 'both manifests missing, same build'; Pass = $false; Fallback = $true; Problem = '构建号还是' }
-        @{ Name = 'SDK with unrelated manifest'; Old = 'v0.37.0'; New = 'v9.0.0'; Sdk = $true; OldId = 'mas-36'; Pass = $true; Fallback = $true }
-        @{ Name = 'SDK, same build'; Old = 'v0.37.0'; New = 'v9.0.0'; Sdk = $true; Pass = $false; Fallback = $true; Problem = '构建号还是' }
+        @{ Name = 'SDK with unrelated manifest, different build'; Old = 'v0.37.0'; New = 'v9.0.0'; Sdk = $true; OldId = 'mas-36'; Pass = $true }
+        @{ Name = 'SDK with unrelated manifest, same build'; Old = 'v0.37.0'; New = 'v9.0.0'; Sdk = $true; Pass = $true; SameSdk = $true }
+        @{ Name = 'SDK without manifest, same build'; Old = 'v0.37.0'; Sdk = $true; Pass = $true; SameSdk = $true }
+        @{ Name = 'SDK without manifest, different build'; Old = 'v0.37.0'; Sdk = $true; OldId = 'mas-36'; Pass = $true }
+        @{ Name = 'SDK without old manifest, same build'; Sdk = $true; Pass = $true; SameSdk = $true }
+        @{ Name = 'SDK with malformed unrelated manifest'; Old = 'v0.37.0'; NewRaw = '{'; Sdk = $true; Pass = $true; SameSdk = $true }
+        @{ Name = 'package with SDK-shaped directory, same build'; Old = 'v0.37.0'; PackageAlsoSdk = $true; Pass = $false; Fallback = $true; Problem = '构建号还是' }
         @{ Name = 'bad old JSON'; OldRaw = '{'; New = 'v0.37.1'; Pass = $false; Problem = '包清单版本无效' }
         @{ Name = 'bad new JSON must not fall back'; Old = 'v0.37.0'; NewRaw = '{'; OldId = 'mas-36'; Pass = $false; Problem = '包清单版本无效' }
         @{ Name = 'missing version must not fall back'; Old = 'v0.37.0'; NewRaw = '{}'; OldId = 'mas-36'; Pass = $false; Problem = '包清单版本无效' }
@@ -79,6 +84,7 @@ try {
         }
         Manifest $prev $case.Old $case.OldRaw
         Manifest $next $case.New $case.NewRaw
+        if ($case.PackageAlsoSdk) { Put (Join-Path $next 'emulator\emulator.exe') 'fixture' }
         $env:MODAVD_REGRESS_PACKAGE = Join-Path $next 'tools'
         $fixture = @{ Script = ''; Tag = ''; Starts = 0; Stops = 0 }
         foreach ($exe in (Join-Path $work 'cli\modavd.exe'), (Join-Path $testRoot 'tools\modavd.exe')) {
@@ -108,7 +114,7 @@ try {
         }
         function global:Get-CimInstance { @() }
         $nextArg = if ($case.Sdk) { Join-Path $next 'sdk' } else { $next }
-        if ($case.Sdk -and $case.New) { Manifest $nextArg $case.New '' }
+        if ($case.Sdk) { Manifest $nextArg $case.New $case.NewRaw }
         $output = @(& $item -Prev $prev -Next $nextArg -ModavdOut $next -Root $testRoot -Work $work -Index 4 -Keep)
         $rows = @($output | Where-Object { $_ -like 'REGRESS-RESULT *' })
         Check ($rows.Count -eq 1) "$($case.Name): one result"
@@ -120,6 +126,10 @@ try {
             Check (-not $result.summary.Contains('清单版本 ')) "$($case.Name): stale manifest ignored"
         }
         if ($case.Version) { Check ($result.summary.Contains("清单版本 $($case.Version)")) "$($case.Name): manifest versions recorded" }
+        if ($case.Sdk) {
+            Check (-not $result.summary.Contains('清单版本 ')) "$($case.Name): SDK manifest ignored"
+            Check ($result.summary.Contains('SDK 模式，构建号没变') -eq [bool]$case.SameSdk) "$($case.Name): same-build explanation"
+        }
         if (-not ($case.Problem -eq '包清单版本无效')) {
             Check ($result.summary.Contains("构建号 $oldId -> mas-37")) "$($case.Name): build IDs recorded"
             Check ($fixture.Starts -eq 4 -and $fixture.Stops -eq 4) "$($case.Name): full upgrade and final stop exercised"

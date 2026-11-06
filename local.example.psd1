@@ -15,6 +15,8 @@
     PackageScripts = ''
     # 上一个生产版的组包目录（升级项的起点，放一份固定副本）
     PrevPackage  = ''
+    # 补全组件的两个 zip（platform-tools_r37.0.1-win.zip、x86_64-34_r14.zip）放在哪个目录；可以不写，fetch 项就从网上下载一次
+    ComponentCache = ''
 
     # ---- 测试机
     # 测试用的 ModAVD 根目录：E:\testbed 下已有的 flow-a / flow-b（11-05 起回归不新建根目录，实例都建在它们里面）。
