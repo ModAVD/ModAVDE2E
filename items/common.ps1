@@ -34,18 +34,41 @@ function Sync-RootTools([string]$Root) {
     }
 }
 
-# 把测试根 mas-avd.json 的 sdkRoot 换成 $Sdk，返回原值（跑完换回去）。只改这一个值，其余字节不动。顺带同步测试根的工具。
-function Set-RootSdk([string]$Root, [string]$Sdk) {
+# 把测试根 mas-avd.json 的 sdkRoot 换成 $Sdk，返回原值（跑完把原值传回来换回去）。只动这一个键，其余字节不动。顺带同步测试根的工具。
+# testbed 的根是整包装出来的，mas-avd.json 里没有 sdkRoot（用根目录下的 sdk\）：这时在开头的「{」后面加上这个键，返回 $null；
+# 换回去时传 $null，把这个键整行删掉（管理器中途改写过 mas-avd.json、把它挪到最后一个也认）。原来就是 "" 的照样换回 ""。
+function Set-RootSdk([string]$Root, $Sdk) {
     Sync-RootTools $Root
     Assert-ManagerPortBase $Root (Join-Path $Root 'tools\modavd.exe') | Out-Null
     $p = Join-Path $Root 'mas-avd.json'
     $t = [IO.File]::ReadAllText($p)
-    $m = [regex]::Match($t, '"sdkRoot":\s*"((?:[^"\\]|\\.)*)"')
-    if (-not $m.Success) { throw "$p 里没有 sdkRoot" }
-    $g = $m.Groups[1]
-    $new = $t.Substring(0, $g.Index) + ($Sdk -replace '\\', '\\') + $t.Substring($g.Index + $g.Length)
+    $keyPattern = '"sdkRoot"\s*:\s*"((?:[^"\\]|\\.)*)"'
+    $m = [regex]::Match($t, $keyPattern)
+    $old = if ($m.Success) { $m.Groups[1].Value -replace '\\\\', '\' } else { $null }
+    if ($null -eq $Sdk) {
+        if (-not $m.Success) { return $null }
+        # 后面跟着逗号的（在前面或中间）连同它前面的换行、缩进一起删；是最后一个键的，连同它前面的逗号一起删
+        $cut = [regex]::Match($t, '(\r?\n[ \t]*)?' + $keyPattern + '\s*,[ \t]*')
+        if (-not $cut.Success) { $cut = [regex]::Match($t, ',\s*' + $keyPattern) }
+        if (-not $cut.Success) { $cut = $m }
+        $new = $t.Remove($cut.Index, $cut.Length)
+    } elseif ($m.Success) {
+        $g = $m.Groups[1]
+        $new = $t.Substring(0, $g.Index) + ([string]$Sdk -replace '\\', '\\' -replace '"', '\"') + $t.Substring($g.Index + $g.Length)
+    } else {
+        $brace = $t.IndexOf('{')
+        if ($brace -lt 0) { throw "$p 不是 JSON 对象" }
+        $value = [string]$Sdk -replace '\\', '\\' -replace '"', '\"'
+        $rest = $t.Substring($brace + 1)
+        # 换行和缩进跟着第一个键；空对象就不加逗号
+        $first = [regex]::Match($rest, '^(\r?\n)([ \t]*)"')
+        $entry = if ($first.Success) { "$($first.Groups[1].Value)$($first.Groups[2].Value)`"sdkRoot`": `"$value`"," }
+        elseif ($rest -match '^\s*}') { "`"sdkRoot`": `"$value`"" }
+        else { "`"sdkRoot`": `"$value`", " }
+        $new = $t.Substring(0, $brace + 1) + $entry + $rest
+    }
     [IO.File]::WriteAllText($p, $new, [Text.UTF8Encoding]::new($false))
-    return ($g.Value -replace '\\\\', '\')
+    return $old
 }
 
 function Get-RootConfig([string]$Root) { Get-Content -LiteralPath (Join-Path $Root 'mas-avd.json') -Raw | ConvertFrom-Json }
