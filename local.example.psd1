@@ -29,6 +29,9 @@
     # 游戏实例（game-real）的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096；要改写成 @{ sr = 20130 } 这样，
     # 只写要改的游戏。端口和它 +1、+2（adb、gRPC）不能落在生产的 20000–20049 上，也不能是 5037、20049、20050，否则报错停下
     GamePorts    = @{}
+    # 游戏实例的名字，默认 ark mas_6、r1999 mas_7、sr gfx_t2、ef endfield；testbed 的根里实例按编号叫 mas_<号>，
+    # 写成 @{ r1999 = 'mas_1' } 这样，只写要改的游戏。实例目录（GameAvdHome / SrAvdHome）在生产根目录下就停
+    GameAvds     = @{}
     GameAvdHome  = ''
     SrAvdHome    = ''
     ImeAvdHome   = ''

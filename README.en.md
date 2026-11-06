@@ -65,6 +65,7 @@ The suite refers to keys with `{Local:<key>}`, and the item scripts take their d
 | --- | --- | --- |
 | `TempRoot` | The root folder for temporary output | runner, all items |
 | `GamePorts` | The console ports of the game instances; defaults are ark 20072, r1999 20100, sr 20120, ef 20096; override with `@{ sr = 20130 }`. A port inside the production 20000-20049 range, or touching 5037, 20049 or 20050, stops with an error | game-real |
+| `GameAvds` | The names of the game instances; defaults are ark `mas_6`, r1999 `mas_7`, sr `gfx_t2`, ef `endfield`. Instances in the testbed roots are named `mas_<number>`; override with `@{ r1999 = 'mas_1' }`. An instance folder (`GameAvdHome` / `SrAvdHome`) under a production root folder stops the run | game-real |
 | `PackageScripts` | The `package\` of the ModAVD repository (the bridge install script `modavd-bridge.ps1` is in it) | runner, bridge, upgrade, game-real |
 | `ProductionRoots` | The production root folders, `D:\ModAVD` by default; a test root, output or work folder under them stops the run | runner, all items |
 | `TestRoot` | The ModAVD root folder used for testing: the existing flow-a / flow-b under `E:\testbed`; a folder that is not an existing root (no `mas-avd.json`) stops the run, none is created (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |

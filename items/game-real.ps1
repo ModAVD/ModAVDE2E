@@ -62,7 +62,17 @@ $cfg = @{
 # 控制台端口可以用本机配置 GamePorts 覆盖（比如 @{ sr = 20120 }）；不管哪来的，都不许落在生产的端口上
 $gamePorts = Use-Local GamePorts $null '' -Optional
 if ($gamePorts -is [System.Collections.IDictionary] -and $gamePorts.Contains($Game)) { $cfg.Port = [int]$gamePorts[$Game] }
-if (-not $ReJudge) { Assert-GameConsolePort $cfg.Port "游戏 $Game" }
+# 实例名可以用本机配置 GameAvds 覆盖（比如 @{ r1999 = 'mas_1' }）：testbed 的根里实例按编号叫 mas_<号>，和以前的测试机不一样
+$gameAvds = Use-Local GameAvds $null '' -Optional
+if ($gameAvds -is [System.Collections.IDictionary] -and $gameAvds.Contains($Game)) {
+    $cfg.Avd = [string]$gameAvds[$Game]
+    if ($cfg.Avd -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*$') { throw "本机配置 GameAvds 里 $Game 的实例名不对：$($cfg.Avd)" }
+}
+if (-not $ReJudge) {
+    Assert-GameConsolePort $cfg.Port "游戏 $Game"
+    # 这一项绕过管理器直接用启动器开机：实例目录在生产根目录下就停（GameAvdHome / SrAvdHome 写错了会开到生产的实例）
+    Assert-NotProduction $cfg.AvdHome "游戏 $Game 的实例目录（GameAvdHome / SrAvdHome）"
+}
 $serial = "emulator-$($cfg.Port)"
 $adbExe = Join-Path $Sdk 'platform-tools\adb.exe'
 $payload = Join-Path $Sdk 'emulator\resources\modavd'

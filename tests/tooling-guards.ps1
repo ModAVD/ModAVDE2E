@@ -110,8 +110,9 @@ try {
     $game = Get-Content -LiteralPath (Join-Path $repo 'items\game-real.ps1') -Raw
     Check ($game -notmatch 'Port\s*=\s*200[0-4]\d\b') 'game-real.ps1 must not hard-code a port in 20000-20049'
     Check ($game -match "sr\s*=\s*@\{[^}]*Port\s*=\s*20120\b") 'game-real.ps1 sr port must be 20120'
-    Check ($game -match '\(-not \$ReJudge\) \{ Assert-GameConsolePort \$cfg\.Port') 'game-real.ps1 must call Assert-GameConsolePort on the console port (unless -ReJudge)'
+    Check ($game -match '\(-not \$ReJudge\) \{\s+Assert-GameConsolePort \$cfg\.Port') 'game-real.ps1 must call Assert-GameConsolePort on the console port (unless -ReJudge)'
     Check ($game -match 'Use-Local GamePorts \$null' -and $game -match '\$gamePorts\.Contains\(\$Game\)') 'game-real.ps1 must read GamePorts'
+    Check ($game -match 'Use-Local GameAvds \$null' -and $game -match '\$gameAvds\.Contains\(\$Game\)') 'game-real.ps1 must read GameAvds'
 }
 finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }

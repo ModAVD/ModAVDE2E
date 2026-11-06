@@ -120,6 +120,26 @@ try {
         Check ($LASTEXITCODE -ne 0 -and $out -match $want) "$($r.Name) 拿 $($r.Args[-1]) 当测试根要停（$want），退出码 $LASTEXITCODE：$($out.Substring(0, [Math]::Min(300, $out.Length)))"
     }
     Check (-not (Test-Path (Join-Path $work 'up')) -and -not (Test-Path (Join-Path $work 'cdu'))) '被拒时没建工作目录'
+
+    # ---- game-real 绕过管理器用启动器开机：实例目录（GameAvdHome）在生产根目录下就停；GameAvds 的实例名要像个名字
+    # 仓库外的东西都指到不存在的路径，没有真程序可跑
+    $missing = Join-Path $work 'missing'
+    $quote = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $externals = (('Launcher', 'Monitor', 'VulkanFixLib', 'PackageScripts', 'Kit') | ForEach-Object { "$_ = $(& $quote (Join-Path $missing $_))" }) -join '; '
+    $gameRuns = @(
+        @{ Name = 'game-real（实例目录在生产根目录下）'; Home = (Join-Path $fakeProd 'avd'); Avds = "@{ r1999 = 'mas_1' }"; Want = '在生产根目录 .+ 下' }
+        @{ Name = 'game-real（GameAvds 的实例名带路径）'; Home = (Join-Path $work 'game-avd'); Avds = "@{ r1999 = '..\mas_1' }"; Want = 'GameAvds 里 r1999 的实例名不对' }
+    )
+    foreach ($g in $gameRuns) {
+        $gameConfig = Join-Path $work 'game.psd1'
+        Set-Content -LiteralPath $gameConfig -Encoding utf8 -Value "@{ ProductionRoots = @($(& $quote $fakeProd)); GameAvdHome = $(& $quote $g.Home); GameAvds = $($g.Avds); $externals }"
+        $env:MODAVD_E2E_CONFIG = $gameConfig
+        $gameOut = Join-Path $work 'game-out'
+        $out = (& pwsh -NoProfile -File (Join-Path $items 'game-real.ps1') -Game r1999 -Sdk $missing -Out $gameOut 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        $env:MODAVD_E2E_CONFIG = $config
+        Check ($LASTEXITCODE -ne 0 -and $out -match $g.Want) "$($g.Name) 要停（$($g.Want)），退出码 $LASTEXITCODE：$($out.Substring(0, [Math]::Min(300, $out.Length)))"
+        Check (-not (Test-Path $gameOut)) "$($g.Name)：被拒时没建输出目录"
+    }
     # 被拒的这一路上，（假的）生产根目录一个文件都没变
     Check ((Snapshot $fakeProd) -eq $prodBefore) '生产根目录里的文件被动过了'
     Write-Host "root guards: $script:count checks passed"

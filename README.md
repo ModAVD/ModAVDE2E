@@ -65,6 +65,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | --- | --- | --- |
 | `TempRoot` | 临时输出的根目录 | 运行器、各项 |
 | `GamePorts` | 游戏实例的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096，写成 `@{ sr = 20130 }` 覆盖；落在生产的 20000–20049 或碰 5037、20049、20050 就报错停下 | game-real |
+| `GameAvds` | 游戏实例的名字，默认 ark `mas_6`、r1999 `mas_7`、sr `gfx_t2`、ef `endfield`；testbed 的根里实例按编号叫 `mas_<号>`，写成 `@{ r1999 = 'mas_1' }` 覆盖。实例目录（`GameAvdHome` / `SrAvdHome`）在生产根目录下就停 | game-real |
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
 | `ProductionRoots` | 生产根目录，默认 `D:\ModAVD`；测试根、输出、工作目录在它下面就停 | 运行器、各项 |
 | `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（私有 adb 端口、`portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）就停，不新建 | bridge、bridge-default、datadisk、yys |
