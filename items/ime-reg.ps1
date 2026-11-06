@@ -28,6 +28,10 @@ if ($Attach -and -not ($PSBoundParameters.ContainsKey('AdbPort') -and $PSBoundPa
 if ($AdbPort -in 5037, 20049, 20050) { throw "adb 端口 $AdbPort 是生产用的，不碰" }
 . (Join-Path $PSScriptRoot '..\local.ps1')
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') 'regress-ime' }
+Assert-NotProduction $Out '输出目录'
+# 不经管理器、直接用启动器开机：实例目录在生产根目录（或 ProductionRoots 列的用户的根）下就停，在建任何目录之前
+$imeAvdHome = if ($Attach) { $null } else { Use-Local ImeAvdHome $null 'ImeAvdHome' }
+if ($imeAvdHome) { Assert-NotProduction $imeAvdHome '输入法冒烟机的实例目录（ImeAvdHome）' }
 if (-not $AdbExe) { $AdbExe = Join-Path $Sdk 'platform-tools\adb.exe' }
 New-Item -ItemType Directory -Force $Out, "$Out\emu" | Out-Null
 $log = "$Out\ime-reg.log"
@@ -79,7 +83,7 @@ if ($Attach) {
 else {
     if (Get-Qemu) { L 'imesmoke 已经开着，不动它，退出'; exit 2 }
     L "开始；SDK $Sdk（$((Select-String -Path "$Sdk\emulator\source.properties" -Pattern 'BuildId').Line)）"
-    $env:ANDROID_AVD_HOME = Use-Local ImeAvdHome $null 'ImeAvdHome'
+    $env:ANDROID_AVD_HOME = $imeAvdHome
     $launcher = Use-Local Launcher $null 'Launcher'
     cmd /c "pwsh -NoProfile -File `"$launcher`" -Avd imesmoke -ConsolePort 20110 -AdbPort 20089 -Sdk `"$Sdk`" -LogDir `"$Out\emu`" -NoLogcat > `"$Out\launcher.log`" 2>&1"
     Get-Content "$Out\launcher.log" | Select-String 'SDK:|booted|adb server' | ForEach-Object { L "launcher: $($_.Line.Trim())" }

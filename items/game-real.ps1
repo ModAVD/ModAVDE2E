@@ -1,7 +1,9 @@
 # 回归项：用各游戏自己的自动化脚本实跑。驱动、实例、启动器、采样脚本都在仓库外，位置在本机配置
 # （local.example.psd1）里：
 #   -Game ark   明日方舟：MAA 集成战略（Kit 的 w1-maa\maa_roguelike.py，先 StartUp 再肉鸽），GameAvdHome 的 mas_6
-#         r1999 重返未来：1999：M9A 启动游戏 + 智能均衡刷材料（Kit 的 m9a_run411_load.py），GameAvdHome 的 mas_7
+#         r1999 重返未来：1999：M9A 启动游戏 + 常规作战打资源本（Kit 的 m9a_run411_load.py），GameAvdHome 的 mas_7；
+#               体力不够时吃不吃糖看 -M9ACandy（默认 0 不吃）。11-05 起不用「智能均衡刷材料」：M9A 4.11.1 里它自己报错、
+#               什么都不打就「成功」退出
 #         sr    崩坏：星穹铁道：SRC 模拟宇宙（SrcKit 的 stress.py，日常挂起；SRC 本身在 SrcDir），SrAvdHome 的 gfx_t2
 #         ef    明日方舟：终末地：MaaEnd（MaaEndDir 的 maaend-run.ps1 -OpenGame），只跑领取类任务，GameAvdHome 的 endfield
 #   -Rounds on（默认）：只跑装桥那一轮，和用户实例一样默认带桥、按包名分流（不再跑不装桥的对照）。
@@ -29,13 +31,16 @@ param(
     # 客体 Vulkan 修复库（本机配置 VulkanFixLib）
     [string]$VulkanFixLib,
     # 不开机、不跑：按 -Out 下各轮存好的驱动输出、采样、日志和 round.json 重新判一次（判法改了以后用）
-    [switch]$ReJudge
+    [switch]$ReJudge,
+    # r1999：常规作战体力不够时最多吃几次糖（传给驱动的 M9A_CANDY）；0 = 不吃，没体力时驱动很快结束，判成没打到战斗
+    [ValidateRange(0, 10)][int]$M9ACandy = 0
 )
 $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 if ($AdbPort -in 5037, 20049, 20050) { throw "adb 端口 $AdbPort 是生产在用的" }
 . (Join-Path $PSScriptRoot '..\local.ps1')
 . (Join-Path $PSScriptRoot 'fps-baseline.ps1')
+. (Join-Path $PSScriptRoot 'port-guard.ps1')
 # 这一项真跑时要的仓库外的东西（-ReJudge 只重新判，都不要）；没配就在这里停
 $need = if ($ReJudge) { @() } else {
     @('Launcher', 'Monitor', 'VulkanFixLib', 'PackageScripts') + @{ ark = @('Kit', 'GameAvdHome'); r1999 = @('Kit', 'GameAvdHome')
@@ -51,9 +56,23 @@ $root1 = Need GameAvdHome
 $cfg = @{
     ark   = @{ Avd = 'mas_6'; Port = 20072; AvdHome = $root1; Memory = 4096; Cores = 4; Pkg = 'com.hypergryph.arknights' }
     r1999 = @{ Avd = 'mas_7'; Port = 20100; AvdHome = $root1; Memory = 6144; Cores = 6; Pkg = 'com.shenlan.m.reverse1999' }
-    sr    = @{ Avd = 'gfx_t2'; Port = 20040; AvdHome = (Need SrAvdHome); Memory = 6144; Cores = 8; Pkg = 'com.miHoYo.hkrpg'; WcAsCached = $true }
+    sr    = @{ Avd = 'gfx_t2'; Port = 20120; AvdHome = (Need SrAvdHome); Memory = 6144; Cores = 8; Pkg = 'com.miHoYo.hkrpg'; WcAsCached = $true }
     ef    = @{ Avd = 'endfield'; Port = 20096; AvdHome = $root1; Memory = 8192; Cores = 6; Pkg = 'com.hypergryph.endfield' }
 }[$Game]
+# 控制台端口可以用本机配置 GamePorts 覆盖（比如 @{ sr = 20120 }）；不管哪来的，都不许落在生产的端口上
+$gamePorts = Use-Local GamePorts $null '' -Optional
+if ($gamePorts -is [System.Collections.IDictionary] -and $gamePorts.Contains($Game)) { $cfg.Port = [int]$gamePorts[$Game] }
+# 实例名可以用本机配置 GameAvds 覆盖（比如 @{ r1999 = 'mas_1' }）：testbed 的根里实例按编号叫 mas_<号>，和以前的测试机不一样
+$gameAvds = Use-Local GameAvds $null '' -Optional
+if ($gameAvds -is [System.Collections.IDictionary] -and $gameAvds.Contains($Game)) {
+    $cfg.Avd = [string]$gameAvds[$Game]
+    if ($cfg.Avd -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*$') { throw "本机配置 GameAvds 里 $Game 的实例名不对：$($cfg.Avd)" }
+}
+if (-not $ReJudge) {
+    Assert-GameConsolePort $cfg.Port "游戏 $Game"
+    # 这一项绕过管理器直接用启动器开机：实例目录在生产根目录下就停（GameAvdHome / SrAvdHome 写错了会开到生产的实例）
+    Assert-NotProduction $cfg.AvdHome "游戏 $Game 的实例目录（GameAvdHome / SrAvdHome）"
+}
 $serial = "emulator-$($cfg.Port)"
 $adbExe = Join-Path $Sdk 'platform-tools\adb.exe'
 $payload = Join-Path $Sdk 'emulator\resources\modavd'
@@ -62,7 +81,8 @@ $packageScripts = Need PackageScripts $env:MODAVD_REGRESS_PACKAGE
 $bridgeScript = if ($packageScripts) { Join-Path $packageScripts 'modavd-bridge.ps1' }
 $monitor = Need Monitor
 $launcher = Need Launcher
-$db = Join-Path $env:LOCALAPPDATA 'Temp\AndroidEmulator'
+# 模拟器的崩溃转储目录；-ReJudge 用不到，没有 LOCALAPPDATA（CI 的 Linux）时也不出错
+$db = [IO.Path]::Combine([string]$env:LOCALAPPDATA, 'Temp', 'AndroidEmulator')
 New-Item -ItemType Directory -Force $Out | Out-Null
 $log = Join-Path $Out 'game-real.log'
 
@@ -100,7 +120,7 @@ function Stop {
 # -Root 指向 $Out\bridge-root（里面的 sdk 是联接到被测 SDK 的）：脚本按它找模拟器版本，工作文件（含客体
 # build.prop 的备份）落在回归输出里，不落进仓库的 tools\logs。输出先改成 UTF-8，免得中文变问号。
 $bridgeRoot = Join-Path $Out 'bridge-root'
-if (-not (Test-Path (Join-Path $bridgeRoot 'sdk'))) {
+if (-not $ReJudge -and -not (Test-Path (Join-Path $bridgeRoot 'sdk'))) {
     New-Item -ItemType Directory -Force $bridgeRoot | Out-Null
     New-Item -ItemType Junction -Path (Join-Path $bridgeRoot 'sdk') -Target $Sdk | Out-Null
 }
@@ -121,7 +141,7 @@ function StartDriver([string]$dir) {
     $env:MAS_AVD_PORT = "$($cfg.Port)"; $env:PYTHONIOENCODING = 'utf-8'
     switch ($Game) {
         'ark' { $env:MAA_LOOP_MIN = "$Minutes"; $env:MAA_LOG = Join-Path $dir 'maa.jsonl'; $exe = 'py'; $al = @('-3.12', '-u', 'maa_roguelike.py', '--adb-port', "$AdbPort"); $wd = "$kit\w1-maa" }
-        'r1999' { $env:M9A_BUDGET_MIN = "$Minutes"; $exe = "$kit\m9a4111\python\python.exe"; $al = @('-u', 'm9a_run411_load.py', '--adb-port', "$AdbPort"); $wd = $kit }
+        'r1999' { $env:M9A_BUDGET_MIN = "$Minutes"; $env:M9A_CANDY = "$M9ACandy"; Remove-Item Env:M9A_PLAN -ErrorAction SilentlyContinue; $exe = "$kit\m9a4111\python\python.exe"; $al = @('-u', 'm9a_run411_load.py', '--adb-port', "$AdbPort"); $wd = $kit }
         'sr' {
             # 和内存测试的星铁负载一样：模拟宇宙，日常全部挂起 23 小时（生产做日常）
             $env:STRESS_MIN = "$Minutes"; $env:STRESS_TRIAL_ROUNDS = '0'; $env:STRESS_ROGUE = '1'
@@ -159,11 +179,30 @@ function DriverVerdict([string]$dir, [int]$exitCode) {
         }
         'r1999' {
             if ($t -notmatch 'done  启动游戏: succeeded') { return $false, 'M9A 启动游戏没成功' }
-            $farm = [regex]::Match($t, 'done  智能均衡刷材料: (\w+) in ([\d.]+) min')
+            $fight = [regex]::Match($t, 'done  常规作战: (\w+) in ([\d.]+) min')
             $budgetStop = $t -match '\(budget stop\)'
-            if (-not $farm.Success) { return $false, 'M9A 刷材料没跑' }
-            if ($farm.Groups[1].Value -ne 'succeeded' -and -not $budgetStop) { return $false, "M9A 刷材料 $($farm.Groups[1].Value)" }
-            return $true, "M9A 刷材料 $($farm.Groups[1].Value)$(if ($budgetStop) { '（到时间停）' })，$($farm.Groups[2].Value) 分钟"
+            if (-not $fight.Success) { return $false, 'M9A 常规作战没跑' }
+            if ($fight.Groups[1].Value -ne 'succeeded' -and -not $budgetStop) { return $false, "M9A 常规作战 $($fight.Groups[1].Value)" }
+            # 没体力（又不吃糖）时常规作战一进去就「成功」退出，没有战斗可测。驱动 11-06 起打出「combat rounds: N」（M9A 自己日志里
+            # 打了几次）：按次数判，0 次就是没打到战斗（体力只够一次时复现 1 次、1.1 分钟就结束，按时长会误判）。
+            # 旧驱动没有这一行、或驱动找不到 M9A 的日志（unknown）时才按时长判：不到 2 分钟算没打（11-05 回归：没体力 0.4–0.6 分钟，
+            # 吃两次糖打完 3.4 分钟）；到时间停的不按时长判。
+            $rounds = [regex]::Match($t, 'combat rounds: (\d+)')
+            $stamina = [regex]::Match($t, 'stamina: (\d+) -> (\d+) \(stage (\d+)\)')
+            $staminaNote = if ($stamina.Success) { "，体力 $($stamina.Groups[1].Value) → $($stamina.Groups[2].Value)（一次 $($stamina.Groups[3].Value)）" } else { '' }
+            $stopNote = if ($budgetStop) { '（到时间停）' } else { '' }
+            if ($rounds.Success) {
+                $n = [int]$rounds.Groups[1].Value
+                if ($n -eq 0) {
+                    $why = if ($budgetStop) { '到时间停了也没打完一次' } else { '体力不够？要吃糖就带 -M9ACandy <次数>' }
+                    return $false, "M9A 常规作战一次都没打（$why）$staminaNote"
+                }
+                return $true, "M9A 常规作战 $($fight.Groups[1].Value)$stopNote，打了 $n 次，$($fight.Groups[2].Value) 分钟$staminaNote"
+            }
+            if (-not $budgetStop -and [double]$fight.Groups[2].Value -lt 2) {
+                return $false, "M9A 常规作战 $($fight.Groups[2].Value) 分钟就结束，没打到战斗（体力不够？要吃糖就带 -M9ACandy <次数>）"
+            }
+            return $true, "M9A 常规作战 $($fight.Groups[1].Value)$stopNote，$($fight.Groups[2].Value) 分钟"
         }
         'sr' {
             if ($t -match 'Traceback') { return $false, 'SRC 驱动有 Traceback' }

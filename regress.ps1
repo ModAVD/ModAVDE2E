@@ -25,14 +25,14 @@ param(
     [string]$Baseline,
     # 默认取 SDK 的 Pkg.BuildId（mas-36 -> mas36）
     [string]$Label,
-    # 默认 <TempRoot>\regress-<Label>-<时间>；本机配置有 TempRoot 时必须在它下面
+    # 默认 <TempRoot>\regress-<Label>-<时间>；不能在生产根目录（本机配置 ProductionRoots，默认 D:\ModAVD）下
     [string]$Out,
     # 这一版改了什么（套件 Scopes 里的名字）
     [string[]]$Scope,
     [string[]]$Only,
     [string[]]$Skip,
-    # 管理器：放着 tools\modavd.exe 和 ModAVD.exe 的目录（ModAVDManager 的 build.ps1 -Out，或解开的 Release 包；
-    # 本机配置 Manager）；发版回归用要随包发的那一版。随包脚本：ModAVD 仓库的 package\（本机配置 PackageScripts），
+    # 管理器：必须给，放着 tools\modavd.exe 和 ModAVD.exe 的目录（ModAVDManager 的 build.ps1 -Out，或解开的 Release 包），
+    # 不从本机配置取：回归用的就是要随包发的那一版，拿本机留着的旧版会让测试根的实例开到生产的端口段上。随包脚本：ModAVD 仓库的 package\（本机配置 PackageScripts），
     # 发版回归用发版克隆里的那份。两个都经环境变量（MODAVD_REGRESS_MANAGER / MODAVD_REGRESS_PACKAGE）传给各项，见 items\common.ps1
     [string]$Manager,
     [string]$PackageScripts,
@@ -42,7 +42,8 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . (Join-Path $PSScriptRoot 'local.ps1')
 $Repo = $PSScriptRoot
-$Manager = (Resolve-Path (Use-Local Manager $Manager '-Manager')).Path
+if (-not $Manager) { throw '没给 -Manager：要传发版用的那个管理器目录（放着 tools\modavd.exe 和 ModAVD.exe，即解开的 ModAVDManager Release 包或 build.ps1 -Out）。不从本机配置取，旧版管理器不认 portBase，会把测试根的实例开到生产的 20000 段上' }
+$Manager = (Resolve-Path $Manager).Path
 $PackageScripts = (Resolve-Path (Use-Local PackageScripts $PackageScripts '-PackageScripts')).Path
 foreach ($f in (Join-Path $Manager 'tools\modavd.exe'), (Join-Path $Manager 'ModAVD.exe'), (Join-Path $PackageScripts 'modavd-bridge.ps1')) {
     if (-not (Test-Path -LiteralPath $f)) { throw "没有 $f（-Manager / -PackageScripts）" }
@@ -64,11 +65,19 @@ if (-not $Label) {
     $Label = $id -replace '-', ''
 }
 $suiteData = Import-PowerShellDataFile -LiteralPath $Suite
-# 临时数据只放临时目录：本机配置有 TempRoot 时输出必须在它下面
-$tempRoot = Use-Local TempRoot $null '' -Optional
+# 输出默认放临时目录（本机配置 TempRoot）；放哪都行，只是不能在生产根目录（含 ProductionRoots 列的用户的根）下
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') "regress-$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
 $Out = [IO.Path]::GetFullPath($Out)
-if ($tempRoot -and -not (Test-Inside $Out @($tempRoot))) { throw "输出要在临时目录 $tempRoot（本机配置 TempRoot）下面：$Out" }
+Assert-NotProduction $Out '回归输出'
+# 本机配置的测试根（实例都建在它们里面，不新建根目录）和绕过管理器直接开机的几台的实例目录：开跑前就核，不等到哪一项才停
+foreach ($key in 'TestRoot', 'PackageRoot') {
+    $configured = Use-Local $key $null '' -Optional
+    if ($configured) { Assert-NotProduction $configured "本机配置的 $key"; Assert-ListedTestRoot $configured "本机配置的 $key" }
+}
+foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
+    $configured = Use-Local $key $null '' -Optional
+    if ($configured) { Assert-NotProduction $configured "本机配置的 $key" }
+}
 
 $items = @($suiteData.Items)
 $ids = $items | ForEach-Object { $_.Id }
@@ -394,9 +403,10 @@ foreach ($it in $items) {
     if (-not (WaitRes $it)) { $r.status = '跳过'; $r.summary = '资源一直不够'; L "[$($it.Id)] 跳过：资源一直不够"; $results.Add([pscustomobject]$r); continue }
     # Item arguments can override the local configuration's root/AVD home.
     $itemRoot = Use-Local TestRoot $null '' -Optional
-    $itemHomes = @(foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
+    $itemHomes = @(foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome', 'PackageRoot') {
             $value = Use-Local $key $null '' -Optional
-            if ($value) { $value }
+            # PackageRoot 是根目录，实例在它的 avd 下
+            if ($value) { if ($key -eq 'PackageRoot') { Join-Path $value 'avd' } else { $value } }
         })
     for ($i = 0; $i -lt $argv.Count - 1; $i++) {
         switch ($argv[$i]) {

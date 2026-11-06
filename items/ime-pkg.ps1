@@ -1,6 +1,7 @@
 # 回归项：用组包目录新建实例，核对随包的宿主输入法（正式签名）开机自动装好、设为默认，跑通道 20 项，再核对开发签名换成正式签名。
-# 根目录照 upgrade.ps1 搭：组包目录整个复制一份（原件不动），adb、系统镜像链到 sdk-official，代替「补全组件」的下载；
-# mas-avd.json 只写私有端口和端口段（portBase）。开关机一律用包里的 tools\modavd.exe（关机先正常关机、不成再 sync 后结束）。
+# 在已有的测试根（本机配置 PackageRoot，没有就 TestRoot；E:\testbed 下的 flow-a / flow-b）上做，不新建根目录（11-05 用户定）：
+# 先把组包目录装进这个根目录（按两边的包根清单换包，avd、logs、mas-avd.json 不动；组包目录原件不动），在里面建一台临时实例。
+# 开关机一律用包里的 tools\modavd.exe（关机先正常关机、不成再 sync 后结束）。
 #  a. modavd create 后第一次 modavd start（无头，和 AUTO-MAS 一样；首次初始化后自己装执行桥，中间关机再开机一两次）：
 #     org.modavd.ime 装上了，base.apk 和包里 components\modavd-ime.apk 逐字节相同（也就是正式签名），已启用，
 #     默认输入法是它，标记 /data/local/tmp/modavd-ime.autoselected 在；
@@ -9,25 +10,19 @@
 #  c. 换签名：卸掉 org.modavd.ime，装开发签名的同一个输入法（证书和正式的不同），启用、设为默认，标记留着；关机再开机：
 #     应该换回正式签名的（base.apk 逐字节相同），默认是它，标记在。再关机开机一次：什么都不变（稳态）；
 #     c 没换成正式签名时，稳态记成「在开发签名的那份上测的」，不算正式签名的稳态；
-#  d. modavd stop，删掉实例和根目录（-Keep 留着）。关机、删实例、等根目录下的进程退出、删根目录，哪步不成都记进问题；
-#     等不到进程退出就不删根目录。日志在 <Work>\logs-<时间>\，不删。
+#  d. modavd stop，删掉这台临时实例（-Keep 留着）；测试根留着、停在这个包上。关机、删实例哪步不成都记进问题。
+#     日志在 <Work>\logs-<时间>\，不删。开始前测试根下要没有在跑的模拟器，编号 -Index 要空着。
 # 用法：pwsh -NoProfile -File items\ime-pkg.ps1 -Package <发版输出>\mas36\release\ModAVD-0.36.0-win-x64
 # 没给的路径取本机配置（local.example.psd1）。
 param(
     # 组包目录（release\ModAVD-<版本>-win-x64），只读
     [Parameter(Mandatory)][string]$Package,
-    # 默认 <TempRoot>\regress-ime-pkg
+    # 在哪个已有的测试根上测（本机配置 PackageRoot，没有就 TestRoot）。不能是生产根目录
+    [string]$Root,
+    # 日志目录的上一级（不是根目录）；默认 <TempRoot>\regress-ime-pkg
     [string]$Work,
-    # 官方 SDK，根目录的 platform-tools、system-images 链到它（OfficialSdk）
-    [string]$Official,
-    [int]$Index = 9,
-    # 根目录私有 adb server 的端口
-    [int]$AdbPort = 20093,
-    # 脚本用的 adb server。不能落在本实例的控制台 / adb / gRPC 端口上，设了 portBase 时也不能落在 20000 段的实例端口上
-    # （modavd 不让）：取 AdbPort - 1 会撞 20000 段 9 号的 gRPC（20092）
-    [int]$ScriptAdbPort = $AdbPort + 1,
-    # 这个根目录的端口段（mas-avd.json 的 portBase），实例就不和同机生产根目录的同编号实例抢端口；0 = 不写，用 20000 段
-    [int]$PortBase = 23000,
+    # 临时实例的编号，测试根里要空着
+    [ValidateRange(0, 9)][int]$Index = 9,
     # 测试 APK（org.modavd.ime.testapp，ModAVDHostIME 编的，不随包发）和开发签名的同一个输入法
     # （ImeTestApk、DevImeApk）
     [string]$TestApk,
@@ -40,19 +35,25 @@ $ErrorActionPreference = 'Stop'
 [cultureinfo]::CurrentCulture = [cultureinfo]::InvariantCulture
 . "$PSScriptRoot\common.ps1"
 if (-not $Work) { $Work = Join-Path (Use-Local TempRoot $null '-Work') 'regress-ime-pkg' }
-$Official = Use-Local OfficialSdk $Official '-Official'
+$Work = [IO.Path]::GetFullPath($Work)
+Assert-NotProduction $Work '工作目录'
+$rootArg = Use-Local PackageRoot $Root '' -Optional
+if (-not $rootArg) { $rootArg = Use-Local TestRoot $null '' -Optional }
+$Root = Resolve-TestRoot $rootArg '输入法回归用的测试根'
+$rootCfg = Get-RootConfig $Root
+$AdbPort = [int]$rootCfg.adbServerPort; $ScriptAdbPort = [int]$rootCfg.scriptAdbServerPort
 $TestApk = Use-Local ImeTestApk $TestApk '-TestApk'
 $DevImeApk = Use-Local DevImeApk $DevImeApk '-DevImeApk'
 $BuildTools = Use-Local BuildTools $BuildTools '-BuildTools'
 # 正式签名密钥的证书（ModAVD 的发布密钥；密钥一旦发出去就不能换）
 $ReleaseCert = 'd18cca3c1982149349f164d28e02490b2eb694e44d56834fa02a1062eb42e823'
 $ImeId = 'org.modavd.ime/.HostImeService'
-$root = Join-Path $Work 'root'
+
 $serial = ''   # 新建以后从 modavd 取
 $runDir = Join-Path $Work "logs-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-$cliExe = Join-Path $root 'tools\modavd.exe'
-$adbExe = Join-Path $root 'sdk\platform-tools\adb.exe'
-function Modavd { & $cliExe --root $root @args 2>&1 | ForEach-Object { "$_" } }
+$cliExe = Join-Path $Root 'tools\modavd.exe'
+$adbExe = Join-Path $Root 'sdk\platform-tools\adb.exe'
+function Modavd { & $cliExe --root $Root @args 2>&1 | ForEach-Object { "$_" } }
 function Adb { & $adbExe -P $AdbPort -s $serial @args 2>&1 | ForEach-Object { "$_" } }
 function Log([string]$m) {
     $l = "$(Get-Date -Format 'HH:mm:ss') $m"
@@ -129,9 +130,9 @@ function Halt([string]$Tag) {
 # 模拟器带窗口要等的进程、文件锁：根目录下还有进程（私有 adb server 除外）就等，最多 $Seconds 秒
 function WaitRootIdle([int]$Seconds = 90) {
     $t0 = Get-Date
-    $tools = Join-Path $root 'sdk\platform-tools'
+    $tools = Join-Path $Root 'sdk\platform-tools'
     while ($true) {
-        $busy = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and
+        $busy = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) -and
                 -not $_.ExecutablePath.StartsWith($tools, [StringComparison]::OrdinalIgnoreCase) })
         if (-not $busy) { return $true }
         if (((Get-Date) - $t0).TotalSeconds -ge $Seconds) { Log "等了 $Seconds 秒，根目录下还有进程：$(($busy | ForEach-Object { "$($_.Name)($($_.ProcessId))" }) -join '、')"; return $false }
@@ -142,14 +143,17 @@ function WaitRootIdle([int]$Seconds = 90) {
 $problems = @(); $notes = @(); $made = $false; $created = $false; $swapped = $false
 try {
     # ---- 前提：组包目录、两个 APK 的签名、端口
-    if (Test-Path -LiteralPath $root) { throw "$root 已存在（上次留下的？删掉或换 -Work）" }
+    # 测试根下不能有在跑的模拟器（别的会话可能正开着它的实例），临时实例的编号要空着
+    if (-not (WaitRootIdle 5)) { throw "测试根 $Root 下还有模拟器在跑" }
+    if ((Test-Path -LiteralPath (Join-Path $Root "avd\mas_$Index.avd")) -or ($rootCfg.instances.PSObject.Properties.Name -contains "$Index")) {
+        throw "测试根 $Root 里已经有 $Index 号实例，换一个空着的 -Index"
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $Package 'sdk\emulator\emulator.exe'))) { throw "不是组包目录：$Package" }
     $pkgApk = Join-Path $Package 'components\modavd-ime.apk'
     foreach ($f in $pkgApk, (Join-Path $Package 'tools\modavd.exe'), $TestApk, $DevImeApk, (Join-Path $BuildTools 'apksigner.bat')) {
         if (-not (Test-Path -LiteralPath $f)) { throw "找不到 $f" }
     }
-    foreach ($p in $AdbPort, $ScriptAdbPort) { if ($p -in 5037, 20049, 20050) { throw "adb server 端口 $p 是生产用的，不碰" } }
-    if ($AdbPort -eq $ScriptAdbPort) { throw '私有和脚本用的 adb server 端口不能一样' }
+    foreach ($p in $AdbPort, $ScriptAdbPort) { Assert-NotProductionPort $p '测试根的 adb server 端口' }
     New-Item -ItemType Directory -Force $runDir | Out-Null
     $buildId = (Select-String -LiteralPath (Join-Path $Package 'sdk\emulator\source.properties') -Pattern '^Pkg\.BuildId=(.+)$').Matches[0].Groups[1].Value.Trim()
     $pkgSha = (Get-FileHash -LiteralPath $pkgApk).Hash.ToLower(); $pkgCert = CertOf $pkgApk
@@ -159,30 +163,30 @@ try {
     if ($pkgCert -ne $ReleaseCert) { throw "包里的 modavd-ime.apk 不是正式签名（证书 $pkgCert）" }
     if ($devCert -eq '?' -or $devCert -eq $ReleaseCert -or $devSha -eq $pkgSha) { throw "$DevImeApk 不是另一把密钥签的（证书 $devCert）" }
 
-    # ---- 根目录：组包目录的副本
+    # ---- 测试根装上这个组包目录
     $made = $true
-    & robocopy $Package $root /E /COPY:DAT /R:5 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "robocopy $Package -> $root 失败（$LASTEXITCODE）" }
-    foreach ($n in 'platform-tools', 'system-images') { New-Item -ItemType Junction -Path (Join-Path $root "sdk\$n") -Target (Join-Path $Official $n) | Out-Null }
-    $pb = if ($PortBase) { ",`n  `"portBase`": $PortBase" } else { '' }
-    [IO.File]::WriteAllText((Join-Path $root 'mas-avd.json'), "{`n  `"adbServerPort`": $AdbPort,`n  `"scriptAdbServerPort`": $ScriptAdbPort$pb`n}`n", [Text.UTF8Encoding]::new($false))
+    $beforeVersion = (Get-Content -LiteralPath (Join-Path $Root 'modavd-manifest.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).version
+    $removed = @(Install-Package $Package $Root)
+    Log "测试根 $Root 装上 $Package（测之前是 $(if ($beforeVersion) { $beforeVersion } else { '没有清单' })；换包删掉 $($removed.Count) 个这个包没有的文件）"
     # 实例的端口按包里的 modavd 用的端口段算：新建时就要无头开一次机，开之前先看端口
-    $base = Resolve-PortBase $root $cliExe $PortBase
-    if ($PortBase -and $base -ne $PortBase) { $notes += '包里的 modavd 还不认 portBase，实例在 20000 段上' }
+    $base = Resolve-PortBase $Root $cliExe 0
     $consolePort = $base + 10 * $Index
     $mine = $consolePort..($consolePort + 2)
     foreach ($p in $AdbPort, $ScriptAdbPort) {
         if ($p -in $mine) { throw "adb server 端口 $p 和 $Index 号实例的控制台 / adb / gRPC 端口（$($mine -join '、')）撞了" }
     }
-    $busyPorts = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } | ForEach-Object { $_.LocalPort } | Sort-Object -Unique)
-    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')" }
-    Log "根目录 $root（adb server $AdbPort / $ScriptAdbPort，端口段 $base）"
+    # 测试根自己的 adb server 开着不算（前一项留下的，比如发版回归里先跑的 upgrade）；实例的端口、别的程序占着 adb 端口才停
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } |
+        ForEach-Object { [pscustomobject]@{ LocalPort = [int]$_.LocalPort; Path = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).Path } })
+    $busyPorts = @(Get-PortConflicts $listeners $mine @($AdbPort, $ScriptAdbPort) $adbExe)
+    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')（adb server 的端口只许测试根自己的 adb 占着）" }
+    Log "根目录 $Root（adb server $AdbPort / $ScriptAdbPort，端口段 $base）"
 
     # ---- a. 新建、第一次开机
     $o = Modavd create --index $Index --title 输入法回归 --memory 4G --cpu 4 --data-gb 16
     if ($LASTEXITCODE -ne 0) { throw "新建失败：$($o -join ' ')" }
     $created = $true
-    $serial = (Assert-InstancePorts $Index $base $root $cliExe).Serial
+    $serial = (Assert-InstancePorts $Index $base $Root $cliExe).Serial
     $b = Boot 'a-first'
     $b.Ime | ForEach-Object { Log "  a: $_" }
     if ($b.Code -ne 0) { throw "第一次开机失败（退出码 $($b.Code)）：$($b.Tail)" }
@@ -201,11 +205,11 @@ try {
     $sb = Snapshot 'b'
     $diff = Changed $sa $sb
     if ($diff -or -not ($b.Ime -match '已是最新')) { $problems += "b 再开机输入法变了：$($diff -join '；')（$($b.Ime -join ' / ')）" }
-    $emuLog = Get-ChildItem -LiteralPath (Join-Path $root 'logs') -File | Where-Object { $_.Name -match "^mas_$Index-\d{8}-\d{6}\.log$" } |
+    $emuLog = Get-ChildItem -LiteralPath (Join-Path $Root 'logs') -File | Where-Object { $_.Name -match "^mas_$Index-\d{8}-\d{6}\.log$" } |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
     if (-not $emuLog) { throw '找不到这次开机的模拟器日志' }
     $regOut = Join-Path $runDir 'ime-reg'
-    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'ime-reg.ps1') -Attach -Sdk (Join-Path $root 'sdk') -Out $regOut -AdbExe $adbExe `
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'ime-reg.ps1') -Attach -Sdk (Join-Path $Root 'sdk') -Out $regOut -AdbExe $adbExe `
         -AdbPort $AdbPort -Serial $serial -EmulatorLog $emuLog -TestApk $TestApk 2>&1 | ForEach-Object { Write-Host "  ime-reg: $_" }
     $regLog = @(Get-Content -LiteralPath (Join-Path $regOut 'ime-reg.log') -Encoding utf8 -ErrorAction SilentlyContinue)
     $sum = $regLog | Select-String -Pattern '汇总：PASS (\d+)，FAIL (\d+)' | Select-Object -Last 1
@@ -266,25 +270,10 @@ sync
             if ($code -ne 0) { $problems += "收尾删实例试了 30 次都没成（退出码 $code）：$(($o | Select-Object -Last 1))"; Log $problems[-1] }
         }
     }
-    # 这个根目录的私有 adb server 跑完就关：留着会一直占着端口
+    # 测试根是共用的：它的 adb server 和根目录都留着，停在这个包上
     if ($made) {
-        foreach ($p in $AdbPort, $ScriptAdbPort) { & (Join-Path $Official 'platform-tools\adb.exe') -P $p kill-server 2>&1 | Out-Null }
-    }
-    if ($made -and -not $Keep) {
-        # 根目录下还有进程在跑就不删：删一半的根目录比留着更难收拾
-        if (-not (WaitRootIdle)) { $problems += "收尾等了 90 秒根目录下还有进程，没删 $root"; Log $problems[-1] }
-        else {
-            # 先拆两个目录联接（rmdir 只删联接本身），确认根目录下没有任何重解析点了，才整个删掉：绝不能删进 sdk-official
-            foreach ($n in 'platform-tools', 'system-images') { $j = Join-Path $root "sdk\$n"; if (Test-Path -LiteralPath $j) { cmd /c rmdir "$j" | Out-Null } }
-            $links = @(Get-ChildItem -LiteralPath $root -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-            if ($links) { $problems += "收尾时根目录下还有联接，没删 $root：$($links.FullName -join '、')"; Log $problems[-1] }
-            else {
-                for ($k = 0; $k -lt 15 -and (Test-Path -LiteralPath $root); $k++) {
-                    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop } catch { Start-Sleep 2 }
-                }
-                if (Test-Path -LiteralPath $root) { $problems += "收尾删了 15 次 $root 还没删干净"; Log $problems[-1] } else { Log "删掉了 $root（日志留在 $runDir）" }
-            }
-        }
+        $nowVersion = (Get-Content -LiteralPath (Join-Path $Root 'modavd-manifest.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).version
+        $notes += "测试根 $Root 现在是 $nowVersion（测之前 $(if ($beforeVersion) { $beforeVersion } else { '没有清单' })）；日志在 $runDir"
     }
 }
 $summary = $notes -join '；'

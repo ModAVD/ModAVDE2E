@@ -21,7 +21,7 @@ and the bundled scripts in `package/` and the bridge in `bridge/` of the ModAVD 
 - **Use newly created test instances logged in with test accounts.** Do not run on an instance logged in with your main account: several items create instances, delete instances and force-stop the game.
 - adb uses only private ports. It does not touch 5037, and it does not touch 20049 / 20050 of the production root folder. Every instance is shut down with `adb shell sync` first.
 - When the test machine also has a production root folder, set `portBase` in the test root's `mas-avd.json` (for example 21000; needs a manager with ModAVD/ModAVD#75),
-  so that its instances do not share ports with the production instances of the same number. The root folders that `upgrade` and `ime-pkg` build themselves write 23000 by default.
+  so that its instances do not share ports with the production instances of the same number. The regression creates no root folders (since 11-05): instances go into the existing test roots under `E:\testbed`, and `upgrade` and `ime-pkg` also first install the package into `PackageRoot` (or `TestRoot`), create a temporary instance there and delete only that instance afterwards. The production root folder `D:\ModAVD`, the root folders listed in the local setting `ProductionRoots` (list the root you use yourself every day there too), and the production adb ports 5037 / 20049 / 20050 are refused as test root, output, work or instance folder. When the local configuration sets `TestRoots`, only the test roots listed there are accepted.
   Every item takes the serial and the ports from `modavd info --json` instead of computing `20000 + 10 × index` itself.
 - Problems and suggestions go to the [Issues](https://github.com/ModAVD/ModAVD/issues) of the ModAVD repository; pick "Pre-release regression". This repository only takes PRs.
 
@@ -42,15 +42,17 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 
 **Frame rate of the game items**: by default `items\game-real.ps1` runs only the round with the bridge installed, and the median frame rate is compared with `baselines\fps.json` (the numbers of the previous production version, with a tolerance for each game).
 `items\yys.ps1` compares the courtyard and each battle with it too (`yys-courtyard`, `yys-battle`). When the same machine runs more than 2 other emulators, it only records the number and does not judge it.
+**The Reverse: 1999 item** (`-Game r1999`) has M9A play a resource stage of the regular combat task (常规作战), to measure the frame rate in battle. Whether it eats candy when stamina runs out is set by `-M9ACandy <times>` (default 0, no candy). If the combat task ends within 2 minutes without being stopped by the time budget, nothing was fought and the item fails (the smart balanced farming task of M9A 4.11.1 reports success without fighting at all, so it is no longer used since 11-05).
+
 The baseline records whether CPU boost (turbo) was on when it was measured (`condition`: `睿频开` on, `睿频关` off). During a run this is read from the host CPU's "processor performance" counter (above 101 % means boost is on). When this run's condition is worse than the baseline's (boost off against a boost-on baseline) or cannot be read, the number is only recorded, not judged; when it is better, it is judged as usual, since boost only raises the frame rate.
 After each release regression passes, write this version's numbers and condition back to `fps.json`.
 
-By default the output goes to `<TempRoot>\regress-<build>-<time>\` (when the local configuration has `TempRoot`, `-Out` must also be under it): the console output of each item `<item>.console.txt`,
+By default the output goes to `<TempRoot>\regress-<build>-<time>\` (`-Out` can be anywhere except under the production root folder): the console output of each item `<item>.console.txt`,
 the item's own output `<item>\`, the overall log `regress.log`, `results.json` and `results.md`. If any item is not "passed", the exit code is 1.
 The start of the log records which build was tested: the hash of the manager's CLI, the commit of the repository that holds the bundled scripts, and the commit of this repository.
 
-`-Manager` is the folder that holds `tools\modavd.exe` and `ModAVD.exe` (the `build.ps1 -Out` of ModAVDManager, or an unpacked release package). For the release regression, use the build that is going to ship in the package.
-`-PackageScripts` is the `package\` of the ModAVD repository; for the release regression, use the one in the release clone. Both can go into the local configuration.
+`-Manager` is the folder that holds `tools\modavd.exe` and `ModAVD.exe` (the `build.ps1 -Out` of ModAVDManager, or an unpacked release package). For the release regression, use the build that is going to ship in the package. It is **required** and is not read from the local configuration: an old manager does not know the `portBase` in the test root's `mas-avd.json` and would start the test root's instances on the production 20000 range. When running a single item on its own, set the environment variable `MODAVD_REGRESS_MANAGER`. Before starting an instance of the test root, the items run `modavd list --json` and check that `port_base` exists (ModAVDManager 0.3.1 and later), matches `portBase`, and is not 20000.
+`-PackageScripts` is the `package\` of the ModAVD repository; for the release regression, use the one in the release clone. It can go into the local configuration.
 
 ## Local configuration
 
@@ -62,11 +64,14 @@ The suite refers to keys with `{Local:<key>}`, and the item scripts take their d
 | Key | What it is | Used by |
 | --- | --- | --- |
 | `TempRoot` | The root folder for temporary output | runner, all items |
-| `Manager` | The folder that holds `tools\modavd.exe` and `ModAVD.exe` | runner, all items |
+| `GamePorts` | The console ports of the game instances; defaults are ark 20072, r1999 20100, sr 20120, ef 20096; override with `@{ sr = 20130 }`. A port inside the production 20000-20049 range, or touching 5037, 20049 or 20050, stops with an error | game-real |
+| `GameAvds` | The names of the game instances; defaults are ark `mas_6`, r1999 `mas_7`, sr `gfx_t2`, ef `endfield`. Instances in the testbed roots are named `mas_<number>`; override with `@{ r1999 = 'mas_1' }`. An instance folder (`GameAvdHome` / `SrAvdHome`) under a production root folder stops the run | game-real |
 | `PackageScripts` | The `package\` of the ModAVD repository (the bridge install script `modavd-bridge.ps1` is in it) | runner, bridge, upgrade, game-real |
-| `TestRoot` | The ModAVD root folder used for testing (private adb port, and `portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
+| `ProductionRoots` | Root folders the tests never touch, in addition to `D:\ModAVD` (not instead of it): list the root you use yourself every day here too. A test root, output, work or instance folder under them stops the run | runner, all items |
+| `TestRoots` | The only test roots the regression may use (optional): when set, only the listed root folders themselves are accepted, and a `TestRoot`, `PackageRoot` or `-Root` pointing elsewhere stops the run | runner, all items |
+| `TestRoot` | The ModAVD root folder used for testing: the existing flow-a / flow-b under `E:\testbed`; a folder that is not an existing root (no `mas-avd.json`), or whose `mas-avd.json` does not set its own `adbServerPort` and `scriptAdbServerPort`, stops the run, none is created (`portBase` when the machine also has a production root folder; instance 0 has the bridge installed and is logged in with the *Onmyoji* test account; the other numbers are created temporarily and deleted after the run) | bridge, bridge-default, datadisk, yys |
+| `PackageRoot` | The test root for the items that install a package (`TestRoot` when not set): it is turned into the package under test first and stays on the new package afterwards | upgrade, ime-pkg |
 | `PrevPackage` | The package staging folder of the previous production version (a fixed copy) | upgrade |
-| `OfficialSdk` | The official SDK (`platform-tools`, `system-images`); the newly built root folder links to it, in place of the download of "fetch the Google components" | upgrade, ime-pkg |
 | `Launcher` | The launcher `avd-p0.ps1` (starts an AVD headless or windowed, with parameters such as `-AdbPort` and `-VulkanFix`) | game-real, ime |
 | `Monitor` | The sampling script `emu_monitor.py` (one line every 30 s: frame rate, restarts, crashes, ANRs, Vulkan errors) | game-real |
 | `VulkanFixLib` | The guest Vulkan fix library | game-real |
@@ -125,7 +130,7 @@ In the game UI, do only fixed operations such as "launch" and "tap Enter Game". 
 | ark / r1999 / sr / ef | `items\game-real.ps1` | A 15-minute real run of each game with its own automation scripts (the round with the bridge installed), with the frame rate compared with `baselines\fps.json` |
 | bridge | `items\bridge.ps1` | The whole flow of installing / uninstalling the bridge (Windows PowerShell 5.1); it creates instance 6 and deletes it after the run |
 | datadisk | `items\datadisk.ps1` | The inode cap on a new disk and growing with `set --data-gb`; it creates instance 3 and deletes it after the run |
-| upgrade | `items\upgrade.ps1` | Builds a root folder from the previous release package, creates an instance and writes data, overlays the new package following "How to update", then checks boot, data, growing the disk, and that a normal boot installs the bridge automatically. When `-Next` is a package staging folder (with `components\modavd-ime.apk`), it also checks that the host IME came with the package, that the installed one is the officially signed one, and that it is set as the default (not checked when `-Next` is an SDK). The root folder is deleted after the run |
+| upgrade | `items\upgrade.ps1` | Installs the previous release package into `PackageRoot` following the package manifests, creates a temporary instance and writes data, overlays the new package following "How to update", then checks boot, data, growing the disk, and that a normal boot installs the bridge automatically. When `-Next` is a package staging folder (with `components\modavd-ime.apk`), it also checks that the host IME came with the package, that the installed one is the officially signed one, and that it is set as the default (not checked when `-Next` is an SDK). Afterwards the temporary instance is deleted and the root folder stays on the new package |
 | yys | `items\yys.ps1` | *Onmyoji* cold-boots into the game and the frame rate is measured (instance 0 of the test root, bridge installed, already logged in); then MaaYYs (`items\maayys_run.py`) really fights Mitama battles |
 | ef-ab | `items\ef-ab.ps1` | *Arknights: Endfield* cold boots, alternating new and old builds; it measures only when the host is idle |
 
@@ -135,7 +140,7 @@ For the opt-in measurement of a newly created data disk and inode use before and
 
 | Item | Script | Notes |
 | --- | --- | --- |
-| ime-pkg | `items\ime-pkg.ps1` | `-Package <package staging folder>` (`release\ModAVD-<version>-win-x64`, read-only): copies it as a root folder and creates instance 9, checks that the officially signed IME is installed automatically on boot and set as the default, runs the 20 channel checks windowed, then checks that a development-signed IME is replaced by the officially signed one and that the steady state does not change. The root folder is deleted after the run, and the log is kept under `-Work` |
+| ime-pkg | `items\ime-pkg.ps1` | `-Package <package staging folder>` (`release\ModAVD-<version>-win-x64`, read-only): installs it into `PackageRoot` following the package manifests and creates temporary instance 9, checks that the officially signed IME is installed automatically on boot and set as the default, runs the 20 channel checks windowed, then checks that a development-signed IME is replaced by the officially signed one and that the steady state does not change. Afterwards the temporary instance is deleted, the root folder stays on this package, and the log is kept under `-Work` |
 
 ## When there is a dedicated test machine
 

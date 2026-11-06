@@ -43,3 +43,35 @@ function Test-Inside([string]$Path, [string[]]$Roots) {
     }
     return $null
 }
+
+# 不碰的根目录：AUTO-MAS 在用的生产根目录 D:\ModAVD，加上本机配置 ProductionRoots 里列的（用户自己用的根，比如
+# E:\testbed\fsync-user，也写进去）；还有生产占着的 adb server 端口。ProductionRoots 是在 D:\ModAVD 之外再加，不是替换它。
+# 测试只读不写：测试根、回归输出、工作目录、实例目录落在这些根目录下面，或者用到这几个端口，就停。
+$script:DefaultProductionRoot = 'D:\ModAVD'
+$script:ProductionAdbPorts = @(5037, 20049, 20050)
+function Get-ProductionRoots {
+    @(@($script:DefaultProductionRoot) + @(Use-Local ProductionRoots $null '' -Optional | Where-Object { $_ }))
+}
+# 比路径用：不分大小写，\ 和 / 都算分隔符（CI 在 Linux 上跑测试，D:\ 写法的路径也要比得出来）。只算字符串，不读盘
+function Get-NormalPath([string]$Path) { ([IO.Path]::GetFullPath($Path) -replace '[\\/]+', '/').TrimEnd('/').ToLowerInvariant() }
+function Test-UnderPath([string]$Path, [string]$Root) {
+    $p = Get-NormalPath $Path; $r = Get-NormalPath $Root
+    $p -eq $r -or $p.StartsWith($r + '/')
+}
+function Assert-NotProduction([string]$Path, [string]$What) {
+    foreach ($r in Get-ProductionRoots) {
+        if (Test-UnderPath $Path $r) { throw "$What 在生产根目录 $r 下（$Path）：测试不碰生产" }
+    }
+}
+# 测试根白名单（可选）：本机配置 TestRoots 列了，回归就只用列出来的根目录本身（维护者的机器上是 E:\testbed\flow-a、flow-b）；
+# 没列就不限，只拒绝上面那些。
+function Assert-ListedTestRoot([string]$Root, [string]$What) {
+    $listed = @(Use-Local TestRoots $null '' -Optional | Where-Object { $_ })
+    if (-not $listed.Count) { return }
+    $p = Get-NormalPath $Root
+    foreach ($r in $listed) { if ((Get-NormalPath $r) -eq $p) { return } }
+    throw "$What $Root 不在本机配置 TestRoots 里（$($listed -join '、')）：回归只用列出来的测试根"
+}
+function Assert-NotProductionPort([int]$Port, [string]$What) {
+    if ($Port -in $script:ProductionAdbPorts) { throw "$What 是 $Port，是生产在用的 adb 端口（$($script:ProductionAdbPorts -join '、')）" }
+}

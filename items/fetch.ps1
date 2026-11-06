@@ -22,6 +22,8 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\common.ps1"
 $Cache = Use-Local ComponentCache $Cache '-Cache' -Optional
 if (-not $Work) { $Work = Join-Path (Use-Local TempRoot $null '-Work') 'regress-fetch' }
+$Work = [IO.Path]::GetFullPath($Work)
+Assert-NotProduction $Work '工作目录'
 $Package = (Resolve-Path -LiteralPath $Package).Path
 $fetchBat = Join-Path $Package '补全组件.bat'
 if (-not (Test-Path -LiteralPath (Join-Path $Package 'tools\modavd.exe')) -or -not (Test-Path -LiteralPath $fetchBat)) {

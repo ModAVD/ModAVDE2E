@@ -3,7 +3,9 @@
 # 占位符：{Sdk} {Baseline} {Label} {Out} {ItemOut} {Repo}，{Local:<键名>} 取本机配置。每项字段见 README.md。
 # 用到的测试机（都是测试数据，不是生产；位置在本机配置里）：
 #   mas_6 / mas_7 / endfield：GameAvdHome（体检、明日方舟、1999、终末地）；gfx_t2：SrAvdHome（星铁）；
-#   imesmoke：ImeAvdHome（输入法）；TestRoot 的 0 号（阴阳师，已装桥、已登录）和临时新建的 3、6、7 号。
+#   imesmoke：ImeAvdHome（输入法）；TestRoot 的 0 号（阴阳师，已装桥、已登录）和临时新建的 3、6、7 号；
+#   PackageRoot（没有就 TestRoot）里临时新建的 8、9 号（upgrade、ime-pkg）。11-05 起不新建根目录：都是 E:\testbed 下已有的根，
+#   生产根目录 D:\ModAVD 和本机配置 ProductionRoots 另列的根（用户自己用的）一律拒绝；写了 TestRoots 时只认列出来的。
 @{
     Avds  = @('mas_0', 'mas_3', 'mas_4', 'mas_6', 'mas_7', 'gfx_t2', 'imesmoke', 'endfield')
     Scopes = @{
@@ -66,8 +68,8 @@
             TimeoutMin = 60
         }
         @{
-            Id = 'r1999'; Title = '《重返未来：1999》M9A：启动游戏 + 智能均衡刷材料 15 分钟（装桥，耗体力一天一轮）'
-            Criterion = 'M9A 启动游戏成功、刷材料成功或到时间停；游戏不重启；无 native crash / ANR / Vulkan 报错 / 新转储；帧率不低于上一版基准超过容差'
+            Id = 'r1999'; Title = '《重返未来：1999》M9A：启动游戏 + 常规作战打资源本 15 分钟（装桥，耗体力一天一轮）'
+            Criterion = 'M9A 启动游戏成功、常规作战成功或到时间停，而且真打了（不到 2 分钟就结束算没打）；游戏不重启；无 native crash / ANR / Vulkan 报错 / 新转储；帧率不低于上一版基准超过容差'
             Scopes = @('emulator')
             Script = '{Repo}\items\game-real.ps1'
             Args = @('-Game', 'r1999', '-Sdk', '{Sdk}', '-Out', '{ItemOut}')

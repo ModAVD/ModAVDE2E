@@ -38,5 +38,17 @@ jobs:
       - name: Check disk usage parsing and install safeguards
         shell: pwsh
         run: ./tests/created-disk-usage.ps1
+      - name: Check the manager requirement, port_base check and game port guard
+        shell: pwsh
+        run: ./tests/tooling-guards.ps1
+      - name: Check how the r1999 item judges the M9A driver
+        shell: pwsh
+        run: ./tests/m9a-verdict.ps1
+      - name: Check that test roots are existing roots and never the production root
+        shell: pwsh
+        run: ./tests/root-guards.ps1
+      - name: Check that pointing a test root at the SDK under test is undone byte for byte
+        shell: pwsh
+        run: ./tests/root-sdk.ps1
       - name: Scan tracked files for private identity and paths
         run: python3 .modavd/scripts/privacy.py .
