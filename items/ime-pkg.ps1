@@ -275,7 +275,8 @@ sync
         $nowVersion = (Get-Content -LiteralPath (Join-Path $Root 'modavd-manifest.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).version
         $notes += "测试根 $Root 现在是 $nowVersion（测之前 $(if ($beforeVersion) { $beforeVersion } else { '没有清单' })）；日志在 $runDir"
     }
-}$summary = $notes -join '；'
+}
+$summary = $notes -join '；'
 if ($problems) { $summary += "；问题：$($problems -join '；')" }
 Result ($problems.Count -eq 0) $summary
 exit 0

@@ -65,12 +65,16 @@ if (-not $Label) {
     $Label = $id -replace '-', ''
 }
 $suiteData = Import-PowerShellDataFile -LiteralPath $Suite
-# 输出默认放临时目录（本机配置 TempRoot）；放哪都行，只是不能在生产根目录下（不用白名单，明确拒绝生产）
+# 输出默认放临时目录（本机配置 TempRoot）；放哪都行，只是不能在生产根目录（含 ProductionRoots 列的用户的根）下
 if (-not $Out) { $Out = Join-Path (Use-Local TempRoot $null '-Out') "regress-$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
 $Out = [IO.Path]::GetFullPath($Out)
 Assert-NotProduction $Out '回归输出'
-# 本机配置的测试根（实例都建在它们里面，不新建根目录）：开跑前就核，不等到哪一项才停
+# 本机配置的测试根（实例都建在它们里面，不新建根目录）和绕过管理器直接开机的几台的实例目录：开跑前就核，不等到哪一项才停
 foreach ($key in 'TestRoot', 'PackageRoot') {
+    $configured = Use-Local $key $null '' -Optional
+    if ($configured) { Assert-NotProduction $configured "本机配置的 $key"; Assert-ListedTestRoot $configured "本机配置的 $key" }
+}
+foreach ($key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome') {
     $configured = Use-Local $key $null '' -Optional
     if ($configured) { Assert-NotProduction $configured "本机配置的 $key" }
 }

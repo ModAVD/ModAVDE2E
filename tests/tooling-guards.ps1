@@ -98,7 +98,8 @@ try {
     Check ((& $fnBody 'Sync-RootTools') -match 'Get-ManagerDir') 'Sync-RootTools must require the manager'
 
     # ---- 5. 游戏端口守卫
-    foreach ($bad in 20000, 20040, 20047, 20049, 20050, 19999, 5037, 5036, 20048) {
+    # 19998、5035 只有 +2（gRPC）会碰到
+    foreach ($bad in 20000, 20040, 20047, 20049, 20050, 19999, 19998, 5037, 5036, 5035, 20048) {
         $m = Throws { Assert-GameConsolePort $bad 'sr' }
         Check ($null -ne $m) "game console port $bad must be refused"
     }
@@ -136,6 +137,44 @@ try {
     $ime = Get-Content -LiteralPath (Join-Path $repo 'items\ime-pkg.ps1') -Raw
     Check ($ime -match 'Get-PortConflicts \$listeners \$mine @\(\$AdbPort, \$ScriptAdbPort\) \$adbExe') 'ime-pkg.ps1 must check ports with Get-PortConflicts and the root''s own adb'
     Check ($ime -match "\`$adbExe = Join-Path \`$Root 'sdk\\platform-tools\\adb\.exe'") 'ime-pkg.ps1 adbExe must be the test root''s own adb'
+
+    # ---- 7. regress.ps1 开跑前的核对（静态看：真跑要一个管理器目录，这里不造假 exe）
+    $reg = Get-Content -LiteralPath (Join-Path $repo 'regress.ps1') -Raw
+    $outCheck = $reg.IndexOf("Assert-NotProduction `$Out '回归输出'")
+    $outMake = $reg.IndexOf('New-Item -ItemType Directory -Force $Out')
+    Check ($outCheck -gt 0 -and $outMake -gt $outCheck) 'regress.ps1 must refuse -Out under a production root before creating it'
+    Check ($reg -match "foreach \(\`$key in 'TestRoot', 'PackageRoot'\) \{\s+\`$configured = Use-Local \`$key \`$null '' -Optional\s+if \(\`$configured\) \{ Assert-NotProduction \`$configured `"本机配置的 \`$key`"; Assert-ListedTestRoot \`$configured") 'regress.ps1 must check the configured TestRoot / PackageRoot (production and TestRoots) before running'
+    Check ($reg -match "foreach \(\`$key in 'GameAvdHome', 'SrAvdHome', 'ImeAvdHome'\) \{\s+\`$configured = Use-Local \`$key \`$null '' -Optional\s+if \(\`$configured\) \{ Assert-NotProduction \`$configured") 'regress.ps1 must check GameAvdHome / SrAvdHome / ImeAvdHome before running'
+    $configCheck = $reg.IndexOf("foreach (`$key in 'GameAvdHome'")
+    $firstItem = $reg.IndexOf('Start-Process pwsh')
+    Check ($configCheck -gt 0 -and $firstItem -gt $configCheck) 'regress.ps1 must check the configuration before it starts any item'
+
+    # ---- 8. 两条语句并成一行（11-06 审查：created-disk-usage 的 `Save-State    Run-Modavd @(...)` 让 create 根本没跑——
+    # PowerShell 把后一条当成前一个函数的参数）。脚本里自己的函数后面跟着另一个函数名当裸参数、或 `}$x = …`，就算并行了
+    $shared = foreach ($lib in 'items\common.ps1', 'items\port-guard.ps1', 'items\disk-usage-lib.ps1', 'local.ps1') {
+        $libAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $lib), [ref]$null, [ref]$null)
+        $libAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }
+    }
+    $merged = [Collections.Generic.List[string]]::new()
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $repo 'items') -Filter '*.ps1') + @(Get-Item -LiteralPath (Join-Path $repo 'regress.ps1'))) {
+        $fileAst = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+        # 调用按 PowerShell 的规矩不分大小写；裸参数要和函数名逐字相同才算（`A emu ime status` 里的 status 是控制台命令，不是 Status）
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $exact = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($n in @($shared) + @($fileAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })) { [void]$names.Add($n); [void]$exact.Add($n) }
+        foreach ($c in $fileAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+            $cmd = $c.GetCommandName()
+            if (-not $cmd -or -not $names.Contains($cmd)) { continue }
+            foreach ($el in @($c.CommandElements | Select-Object -Skip 1)) {
+                if ($el -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $el.StringConstantType -eq 'BareWord' -and $exact.Contains($el.Value)) {
+                    $merged.Add("$($f.Name):$($c.Extent.StartLineNumber) $($c.Extent.Text)")
+                }
+            }
+        }
+        $lineNo = 0
+        foreach ($line in [IO.File]::ReadAllLines($f.FullName)) { $lineNo++; if ($line -match '^\s*\}\s*\$\w+\s*=') { $merged.Add("$($f.Name):$lineNo $line") } }
+    }
+    Check ($merged.Count -eq 0) "two statements run together on one line: $($merged -join ' | ')"
 }
 finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }

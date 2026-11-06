@@ -21,7 +21,7 @@ ModAVD 仓库里的随包脚本 `package/` 和执行桥 `bridge/`，所以单独
 - **测试实例用新建的、登测试号的**，不要拿登着主力账号的实例来跑：有几项会建实例、删实例、强停游戏。
 - adb 只用私有端口，不碰 5037，也不碰生产根目录的 20049 / 20050；关实例一律先 `adb shell sync` 再关。
 - 测试机上同时有生产根目录时，测试根要在 `mas-avd.json` 里设 `portBase`（比如 21000，要管理器带 ModAVD/ModAVD#75），
-  实例的端口就不和生产的同编号实例撞。回归不新建根目录（11-05 起）：实例都建在 `E:\testbed` 下已有的测试根里，`upgrade`、`ime-pkg` 也是在 `PackageRoot`（没有就 `TestRoot`）上先装包、建临时实例，测完只删实例。生产根目录（本机配置 `ProductionRoots`，默认 `D:\ModAVD`）和生产的 adb 端口 5037 / 20049 / 20050 当测试根、输出、工作目录一律拒绝。各项的 serial 和端口都从
+  实例的端口就不和生产的同编号实例撞。回归不新建根目录（11-05 起）：实例都建在 `E:\testbed` 下已有的测试根里，`upgrade`、`ime-pkg` 也是在 `PackageRoot`（没有就 `TestRoot`）上先装包、建临时实例，测完只删实例。生产根目录 `D:\ModAVD`、本机配置 `ProductionRoots` 另列的根目录（你自己日常在用的根也写进去），以及生产的 adb 端口 5037 / 20049 / 20050，当测试根、输出、工作目录、实例目录一律拒绝；本机配置写了 `TestRoots` 时，测试根只认列出来的那几个。各项的 serial 和端口都从
   `modavd info --json` 取，不自己按 `20000 + 10 × 编号` 算。
 - 问题和建议到 ModAVD 仓库的 [Issues](https://github.com/ModAVD/ModAVD/issues) 提，选上「发版前回归」；本仓库只收 PR。
 
@@ -67,8 +67,9 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | `GamePorts` | 游戏实例的控制台端口，默认 ark 20072、r1999 20100、sr 20120、ef 20096，写成 `@{ sr = 20130 }` 覆盖；落在生产的 20000–20049 或碰 5037、20049、20050 就报错停下 | game-real |
 | `GameAvds` | 游戏实例的名字，默认 ark `mas_6`、r1999 `mas_7`、sr `gfx_t2`、ef `endfield`；testbed 的根里实例按编号叫 `mas_<号>`，写成 `@{ r1999 = 'mas_1' }` 覆盖。实例目录（`GameAvdHome` / `SrAvdHome`）在生产根目录下就停 | game-real |
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
-| `ProductionRoots` | 生产根目录，默认 `D:\ModAVD`；测试根、输出、工作目录在它下面就停 | 运行器、各项 |
-| `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（私有 adb 端口、`portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）就停，不新建 | bridge、bridge-default、datadisk、yys |
+| `ProductionRoots` | 测试不碰的根目录，在 `D:\ModAVD` 之外再加（不是替换它）：你自己日常在用的根也写进来。测试根、输出、工作目录、实例目录在它们下面就停 | 运行器、各项 |
+| `TestRoots` | 回归只许用的测试根（可以不写）：写了就只认列出来的根目录本身，`TestRoot`、`PackageRoot`、`-Root` 指到别处就停 | 运行器、各项 |
+| `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（`mas-avd.json` 里要写自己的 `adbServerPort`、`scriptAdbServerPort` 和 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）、没写这两个 adb 端口就停，不新建 | bridge、bridge-default、datadisk、yys |
 | `PackageRoot` | 装包类的项用的测试根（不写就用 `TestRoot`）：先装成要测的包，测完根目录停在新包上 | upgrade、ime-pkg |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |
 | `ComponentCache` | 放着 `platform-tools_r37.0.1-win.zip`、`x86_64-34_r14.zip` 的目录（可以没有：没有就从网上下载一次） | fetch |

@@ -279,7 +279,8 @@ if [ -e /data/local/tmp/modavd-ime.autoselected ]; then echo mark=1; else echo m
             if (Test-Path -LiteralPath $Work) { $problems += "收尾删了 15 次临时目录 $Work 还没删干净"; Say $problems[-1] }
         }
     }
-}$summary = $notes -join '；'
+}
+$summary = $notes -join '；'
 if ($problems) { $summary += "；问题：$($problems -join '；')" }
 Result ($problems.Count -eq 0) $summary
 exit 0

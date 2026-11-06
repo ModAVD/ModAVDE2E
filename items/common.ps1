@@ -74,17 +74,23 @@ function Set-RootSdk([string]$Root, $Sdk) {
 function Get-RootConfig([string]$Root) { Get-Content -LiteralPath (Join-Path $Root 'mas-avd.json') -Raw | ConvertFrom-Json }
 
 # 测试根：已有的 ModAVD 根目录（E:\testbed 下的 flow-a / flow-b），回归只在里面建临时实例，不新建根目录（11-05 用户定：
-# testbed 里只有三组模拟器，不可以去别的地方新建）。生产根目录和生产的 adb 端口一律拒绝。返回完整路径。
+# testbed 里只有三组模拟器，不可以去别的地方新建）。生产根目录（含 ProductionRoots 列的用户的根）一律拒绝；本机配置列了
+# TestRoots 时只认列出来的。两个 adb server 端口都要写在 mas-avd.json 里、不是生产的（没写时管理器用生产的 20050 / 20049）。
+# 返回完整路径。
 function Resolve-TestRoot([string]$Root, [string]$What = '测试根') {
     if (-not $Root) { throw "没有$What：给 -Root，或者写进本机配置 TestRoot / PackageRoot（E:\testbed 下已有的根目录）" }
     $full = [IO.Path]::GetFullPath($Root)
     Assert-NotProduction $full $What
+    Assert-ListedTestRoot $full $What
     if (-not (Test-Path -LiteralPath (Join-Path $full 'mas-avd.json') -PathType Leaf)) {
         throw "$What $full 没有 mas-avd.json：回归只用已有的测试根（E:\testbed 下的 flow-a / flow-b），不新建根目录"
     }
     $cfg = Get-RootConfig $full
     foreach ($k in 'adbServerPort', 'scriptAdbServerPort') {
-        if ($cfg.PSObject.Properties.Name -contains $k -and $cfg.$k) { Assert-NotProductionPort ([int]$cfg.$k) "$What 的 $k" }
+        if (-not ($cfg.PSObject.Properties.Name -contains $k -and $cfg.$k)) {
+            throw "$What $full 的 mas-avd.json 没写 $k：没写时管理器用生产的 adb 端口（20050 / 20049），测试根要写自己的"
+        }
+        Assert-NotProductionPort ([int]$cfg.$k) "$What 的 $k"
     }
     $full
 }
@@ -106,12 +112,18 @@ function Get-StalePackageFiles($Current, $Next) {
 # 把组包目录 $From 装进测试根 $Root（「怎么更新」那样整个覆盖），装哪一版都行（升级测试先装回上一版）：
 # 先删掉根目录现在的包里有、$From 里没有的文件（按两边的 modavd-manifest.json），再整个覆盖。avd、logs、mas-avd.json 这些
 # 不在清单里的不动。$From 的清单认不出（早年的包没有清单）时不知道该删哪些，只覆盖。返回删掉的文件。
+# 清单写错、列了绝对路径、带 ..、或者列了 avd\、logs\、mas-avd.json（实例、日志、配置）时，一个文件都不删就停。
 function Install-Package([string]$From, [string]$Root) {
     Assert-NotProduction $Root '要换包的根目录'
+    Assert-ListedTestRoot $Root '要换包的根目录'
     $fromFiles = Get-ManifestFiles $From
     $stale = if ($null -ne $fromFiles) { Get-StalePackageFiles (Get-ManifestFiles $Root) $fromFiles } else { @() }
     foreach ($rel in $stale) {
         if ([IO.Path]::IsPathRooted($rel) -or $rel -match '(^|[\\/])\.\.([\\/]|$)') { throw "清单里的路径不对：$rel" }
+        $top = ($rel -split '[\\/]')[0]
+        if ($top -in 'avd', 'logs', 'mas-avd.json') { throw "清单里列了实例、日志或配置（$rel）：换包不删这些" }
+    }
+    foreach ($rel in $stale) {
         $p = Join-Path $Root $rel
         if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
     }

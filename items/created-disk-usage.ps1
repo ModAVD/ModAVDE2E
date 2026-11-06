@@ -70,7 +70,8 @@ if ($Action -eq 'Create') {
     if ($busy) { throw "Instance ports in use: $(($busy.LocalPort | Sort-Object -Unique) -join ', ')" }
     New-Item -ItemType Directory -Path $Work | Out-Null
     $state = [pscustomobject]@{ root=$Root; index=$Index; portBase=$PortBase; adbPort=$AdbPort; scriptAdbPort=$ScriptAdbPort; version=$version; dataGB=$DataGB; memory='4G'; cpu=4; bridge='default'; serial=''; createStarted=(Get-Date).ToString('o'); samples=@() }
-    Save-State    Run-Modavd @('create','--index',"$Index",'--title','disk usage','--memory','4G','--cpu','4','--data-gb',"$DataGB")
+    Save-State
+    Run-Modavd @('create','--index',"$Index",'--title','disk usage','--memory','4G','--cpu','4','--data-gb',"$DataGB")
     $state | Add-Member -NotePropertyName createFinished -NotePropertyValue (Get-Date).ToString('o')
     $state.serial = (Assert-InstancePorts $Index $PortBase $Root $exe).Serial
     Save-State
