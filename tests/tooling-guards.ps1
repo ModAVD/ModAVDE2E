@@ -113,6 +113,29 @@ try {
     Check ($game -match '\(-not \$ReJudge\) \{\s+Assert-GameConsolePort \$cfg\.Port') 'game-real.ps1 must call Assert-GameConsolePort on the console port (unless -ReJudge)'
     Check ($game -match 'Use-Local GamePorts \$null' -and $game -match '\$gamePorts\.Contains\(\$Game\)') 'game-real.ps1 must read GamePorts'
     Check ($game -match 'Use-Local GameAvds \$null' -and $game -match '\$gameAvds\.Contains\(\$Game\)') 'game-real.ps1 must read GameAvds'
+
+    # ---- 6. 已有测试根里新建实例前的端口检查：测试根自己的 adb server 开着不算（11-06 实跑：upgrade 之后 ime-pkg 被它拦住）
+    $rootAdb = Join-Path $scratch 'root/sdk/platform-tools/adb.exe'
+    $otherAdb = Join-Path $scratch 'other/sdk/platform-tools/adb.exe'
+    function L([int]$port, $path) { [pscustomobject]@{ LocalPort = $port; Path = $path } }
+    $inst = @(31090, 31091, 31092); $adbs = @(31099, 31098)
+    $r = @(Get-PortConflicts @() $inst $adbs $rootAdb)
+    Check ($r.Count -eq 0) "nothing listening must give no conflicts, got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31099 $rootAdb), (L 31098 $rootAdb.ToUpper())) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 0) "the test root's own adb server on its adb ports must not count, got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31099 (Join-Path $scratch 'root/sdk/../sdk/platform-tools/adb.exe'))) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 0) "own adb given as a non-normalized path must not count, got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31099 $otherAdb)) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 1 -and $r[0] -eq 31099) "another root's adb on the adb port must count, got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31098 $null)) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 1 -and $r[0] -eq 31098) "an adb port held by a process whose path is unknown must count, got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31091 $rootAdb), (L 31090 $null), (L 31091 $null)) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 2 -and $r[0] -eq 31090 -and $r[1] -eq 31091) "instance ports must count whoever holds them (sorted, unique), got: $($r -join ',')"
+    $r = @(Get-PortConflicts @((L 31093 $null), (L 31097 $otherAdb)) $inst $adbs $rootAdb)
+    Check ($r.Count -eq 0) "ports outside the instance and adb ports must not count, got: $($r -join ',')"
+    $ime = Get-Content -LiteralPath (Join-Path $repo 'items\ime-pkg.ps1') -Raw
+    Check ($ime -match 'Get-PortConflicts \$listeners \$mine @\(\$AdbPort, \$ScriptAdbPort\) \$adbExe') 'ime-pkg.ps1 must check ports with Get-PortConflicts and the root''s own adb'
+    Check ($ime -match "\`$adbExe = Join-Path \`$Root 'sdk\\platform-tools\\adb\.exe'") 'ime-pkg.ps1 adbExe must be the test root''s own adb'
 }
 finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }

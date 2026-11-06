@@ -175,8 +175,11 @@ try {
     foreach ($p in $AdbPort, $ScriptAdbPort) {
         if ($p -in $mine) { throw "adb server 端口 $p 和 $Index 号实例的控制台 / adb / gRPC 端口（$($mine -join '、')）撞了" }
     }
-    $busyPorts = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } | ForEach-Object { $_.LocalPort } | Sort-Object -Unique)
-    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')" }
+    # 测试根自己的 adb server 开着不算（前一项留下的，比如发版回归里先跑的 upgrade）；实例的端口、别的程序占着 adb 端口才停
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in (@($AdbPort, $ScriptAdbPort) + $mine) } |
+        ForEach-Object { [pscustomobject]@{ LocalPort = [int]$_.LocalPort; Path = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).Path } })
+    $busyPorts = @(Get-PortConflicts $listeners $mine @($AdbPort, $ScriptAdbPort) $adbExe)
+    if ($busyPorts) { throw "端口已被占用：$($busyPorts -join '、')（adb server 的端口只许测试根自己的 adb 占着）" }
     Log "根目录 $Root（adb server $AdbPort / $ScriptAdbPort，端口段 $base）"
 
     # ---- a. 新建、第一次开机
