@@ -1,6 +1,7 @@
 # 1999 那一项（items\game-real.ps1 -Game r1999）怎么判驱动：用 -ReJudge 按造好的驱动输出重判，不开机、不连 adb。
 # 11-05：M9A 4.11.1 的「智能均衡刷材料」什么都不打就「成功」退出，回归里 0.6 分钟就结束的那几次其实没打；
-# 现在驱动打「常规作战」，不到 2 分钟就结束（又不是到时间停）算没打到战斗。
+# 现在驱动打「常规作战」。11-06 起驱动打出打了几次（combat rounds: N），按次数判，0 次算没打到战斗；
+# 旧驱动没有这一行时才按时长判：不到 2 分钟就结束（又不是到时间停）算没打到战斗。
 $ErrorActionPreference = 'Stop'
 $count = 0
 function Check([bool]$ok, [string]$message) {
@@ -44,6 +45,19 @@ try {
     Check ($s -match 'M9A 常规作战没跑') "旧任务的输出不能当成打过：$s"
     $s = Verdict 'no-start' @('12:00:00 done  启动游戏: FAILED in 3.0 min')
     Check ($s -match 'M9A 启动游戏没成功') "启动游戏没成功要报：$s"
+    # 驱动 11-06 起打出打了几次：按次数判，不按时长（11-06 实跑：体力 32、一次 25，复现 1 次，1.1 分钟）
+    $s = Verdict 'one-round' @($start, '12:01:00 start 常规作战', '12:02:06 done  常规作战: succeeded in 1.1 min', '12:02:06 combat rounds: 1', '12:02:06 stamina: 32 -> 7 (stage 25)', '12:02:07 all finished in 2.4 min')
+    Check ($s -match 'M9A 常规作战 succeeded，打了 1 次，1\.1 分钟，体力 32 → 7（一次 25）' -and $s -notmatch '没打') "体力只够一次、1.1 分钟就结束的也算打了：$s"
+    $s = Verdict 'zero-rounds' @($start, '12:01:00 start 常规作战', '12:01:30 done  常规作战: succeeded in 0.5 min', '12:01:30 combat rounds: 0', '12:01:30 stamina: 7 -> 7 (stage 25)')
+    Check ($s -match '问题：.*一次都没打（体力不够') "打了 0 次要算没打：$s"
+    $s = Verdict 'zero-rounds-long' @($start, '12:01:00 start 常规作战', '12:05:00 done  常规作战: succeeded in 4.0 min', '12:05:00 combat rounds: 0')
+    Check ($s -match '问题：.*一次都没打') "打了 0 次就算用时长也是没打：$s"
+    $s = Verdict 'zero-rounds-budget' @($start, '12:01:00 start 常规作战', '12:16:00 budget 15 min reached, stopping', '12:16:01 done  常规作战: FAILED in 15.0 min', '12:16:01 combat rounds: 0', '12:16:01 all finished in 16.2 min (budget stop)')
+    Check ($s -match '问题：.*一次都没打（到时间停了也没打完一次）') "到时间停、一次都没打完的要算问题：$s"
+    $s = Verdict 'rounds-budget' @($start, '12:01:00 start 常规作战', '12:16:00 budget 15 min reached, stopping', '12:16:01 done  常规作战: FAILED in 15.0 min', '12:16:01 combat rounds: 9', '12:16:01 all finished in 16.2 min (budget stop)')
+    Check ($s -match 'M9A 常规作战 FAILED（到时间停），打了 9 次，15\.0 分钟' -and $s -notmatch '问题：.*(驱动|没打|一次都没)') "到时间停、打了几次的算过：$s"
+    $s = Verdict 'rounds-unknown' @($start, '12:01:00 start 常规作战', '12:01:30 done  常规作战: succeeded in 0.6 min', '12:01:30 combat rounds: unknown')
+    Check ($s -match '0\.6 分钟就结束，没打到战斗') "驱动找不到 M9A 日志（unknown）时退回按时长判：$s"
     # 吃糖次数是参数，不再写死
     $text = Get-Content -LiteralPath $runner -Raw
     Check ($text -match '\[ValidateRange\(0, 10\)\]\[int\]\$M9ACandy = 0') 'game-real.ps1 要有 -M9ACandy（0–10，默认 0）'

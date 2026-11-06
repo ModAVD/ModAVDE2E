@@ -183,11 +183,26 @@ function DriverVerdict([string]$dir, [int]$exitCode) {
             $budgetStop = $t -match '\(budget stop\)'
             if (-not $fight.Success) { return $false, 'M9A 常规作战没跑' }
             if ($fight.Groups[1].Value -ne 'succeeded' -and -not $budgetStop) { return $false, "M9A 常规作战 $($fight.Groups[1].Value)" }
-            # 没体力（又不吃糖）时常规作战一进去就「成功」退出，没有战斗可测（11-05 回归：0.4–0.6 分钟；吃两次糖打完是 3.4 分钟）
+            # 没体力（又不吃糖）时常规作战一进去就「成功」退出，没有战斗可测。驱动 11-06 起打出「combat rounds: N」（M9A 自己日志里
+            # 打了几次）：按次数判，0 次就是没打到战斗（体力只够一次时复现 1 次、1.1 分钟就结束，按时长会误判）。
+            # 旧驱动没有这一行、或驱动找不到 M9A 的日志（unknown）时才按时长判：不到 2 分钟算没打（11-05 回归：没体力 0.4–0.6 分钟，
+            # 吃两次糖打完 3.4 分钟）；到时间停的不按时长判。
+            $rounds = [regex]::Match($t, 'combat rounds: (\d+)')
+            $stamina = [regex]::Match($t, 'stamina: (\d+) -> (\d+) \(stage (\d+)\)')
+            $staminaNote = if ($stamina.Success) { "，体力 $($stamina.Groups[1].Value) → $($stamina.Groups[2].Value)（一次 $($stamina.Groups[3].Value)）" } else { '' }
+            $stopNote = if ($budgetStop) { '（到时间停）' } else { '' }
+            if ($rounds.Success) {
+                $n = [int]$rounds.Groups[1].Value
+                if ($n -eq 0) {
+                    $why = if ($budgetStop) { '到时间停了也没打完一次' } else { '体力不够？要吃糖就带 -M9ACandy <次数>' }
+                    return $false, "M9A 常规作战一次都没打（$why）$staminaNote"
+                }
+                return $true, "M9A 常规作战 $($fight.Groups[1].Value)$stopNote，打了 $n 次，$($fight.Groups[2].Value) 分钟$staminaNote"
+            }
             if (-not $budgetStop -and [double]$fight.Groups[2].Value -lt 2) {
                 return $false, "M9A 常规作战 $($fight.Groups[2].Value) 分钟就结束，没打到战斗（体力不够？要吃糖就带 -M9ACandy <次数>）"
             }
-            return $true, "M9A 常规作战 $($fight.Groups[1].Value)$(if ($budgetStop) { '（到时间停）' })，$($fight.Groups[2].Value) 分钟"
+            return $true, "M9A 常规作战 $($fight.Groups[1].Value)$stopNote，$($fight.Groups[2].Value) 分钟"
         }
         'sr' {
             if ($t -match 'Traceback') { return $false, 'SRC 驱动有 Traceback' }
