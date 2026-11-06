@@ -142,7 +142,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 | 项 | 脚本 | 说明 |
 | --- | --- | --- |
 | ime-pkg | `items\ime-pkg.ps1` | `-Package <组包目录>`（`release\ModAVD-<版本>-win-x64`，只读）：按包根清单装进 `PackageRoot`、新建 9 号临时实例，核对正式签名的输入法开机自动装好、设为默认，带窗口跑通道 20 项，再核对开发签名的换成正式签名、稳态不变；跑完删临时实例，根目录停在这个包上，日志留在 `-Work` 下 |
-| fetch | `items\fetch.ps1` | `-Package <组包目录>`（只读）：搭两个只够补全组件用的新根目录，一个跑 `tools\modavd.exe components fetch`，一个用重定向的输入跑「补全组件.bat」（新版先选下载源，回车是自动；再同意许可协议），两样都要装好，再跑一次 `fetch` 都算齐全；新版批处理还要把下载源记成 `auto`。只有取许可协议清单要联网，`-Cache`（本机配置 `ComponentCache`）给了放着两个 zip 的目录时不下载，没给时命令行那遍下载一次、批处理那遍用它留下的 zip；不开模拟器；根目录跑完删掉 |
+| fetch | `items\fetch.ps1` | `-Package <组包目录>`（只读）：搭只够补全组件用的新根目录，跑 `tools\modavd.exe components fetch`；包根还有「补全组件.bat」的（0.38.1 及更早）再另搭一个，用重定向的输入跑它（同意许可协议）。都要装好，再跑一次 `fetch` 都算齐全。跑的时候 `LOCALAPPDATA` 指到工作目录里的空目录，不读写本机记住的下载源（管理器 0.5.0 起）。只有取许可协议清单要联网，`-Cache`（本机配置 `ComponentCache`）给了放着两个 zip 的目录时不下载，没给时命令行那遍下载一次、批处理那遍用它留下的 zip；不开模拟器；根目录跑完删掉 |
 
 ## 以后有了专门跑测试的机器
 
