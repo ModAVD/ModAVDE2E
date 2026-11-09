@@ -100,7 +100,7 @@ function Others {
 
 function Boot([string]$dir) {
     $env:ANDROID_AVD_HOME = $cfg.AvdHome
-    $env:ANDROID_EMU_VK_HIDE_REBAR = '1'   # 10-16 起 AUTO-MAS 对魔改 AVD 固定开
+    $env:ANDROID_EMU_VK_HIDE_REBAR = '1'   # 10-16 起 AUTO-MAS 对 ModAVD 固定开
     $p = @{ Avd = $cfg.Avd; ConsolePort = $cfg.Port; AdbPort = $AdbPort; Sdk = $Sdk; Headless = $true; VulkanFix = $true
         VulkanFixLib = $VulkanFixLib; Memory = $cfg.Memory; Cores = $cfg.Cores; LogDir = $dir; Feature = 'VulkanBatchedDescriptorSetUpdate' }
     if ($cfg.WcAsCached) { $p.WcAsCached = $true }
