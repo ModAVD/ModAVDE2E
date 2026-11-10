@@ -5,7 +5,7 @@
 $script:FetchZips = @('platform-tools_r37.0.1-win.zip', 'x86_64-34_r14.zip')
 
 # 这个组包目录要跑哪几遍：命令行（cli）总跑；包根还有「补全组件.bat」的（0.38.1 及更早）再跑批处理（bat）。
-# 0.39 起包里没有批处理，补全组件在管理器和命令行里（ModAVD/ModAVD#119）。没有 tools\modavd.exe 的不是组包目录，报错。
+# 0.38.2 起包里没有批处理，补全组件在管理器和命令行里（ModAVD/ModAVD#119）。没有 tools\modavd.exe 的不是组包目录，报错。
 function Get-FetchPasses([string]$Package) {
     if (-not (Test-Path -LiteralPath (Join-Path $Package 'tools\modavd.exe') -PathType Leaf)) {
         throw "不是组包目录（要有 tools\modavd.exe）：$Package"
@@ -107,7 +107,7 @@ function Invoke-FetchItem {
 
         # 2. 批处理（只有 0.38.1 及更早的包有）：zip 用上一步留下的（或缓存的）
         if ($passes -notcontains 'bat') {
-            $notes += '包里没有「补全组件.bat」（0.39 起），只跑了命令行这一遍'
+            $notes += '包里没有「补全组件.bat」（0.38.2 起），只跑了命令行这一遍'
         } else {
             $batRoot = Join-Path $Work 'bat'
             New-FetchRoot $Package $batRoot
