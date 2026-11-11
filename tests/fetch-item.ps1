@@ -1,6 +1,6 @@
 #requires -Version 7.0
 # fetch 项（items\fetch-lib.ps1 的 Invoke-FetchItem）的测试：命令行和批处理都换成假的，不跑任何真程序、不联网、不开模拟器。
-#  - 包里没有「补全组件.bat」（0.39 起，ModAVD/ModAVD#119）只跑命令行那一遍；有的（0.38.1 及更早）两遍都跑；
+#  - 包里没有「补全组件.bat」（0.38.2 起，ModAVD/ModAVD#119）只跑命令行那一遍；有的（0.38.1 及更早）两遍都跑；
 #    没有 tools\modavd.exe 的不是组包目录。
 #  - 两遍跑的时候 LOCALAPPDATA 都指到工作目录里的空目录，跑完（出错也一样）换回原值；「本机的」LOCALAPPDATA 一个文件都不变。
 # 这个测试碰不到真的 %LOCALAPPDATA%\ModAVD，被测代码就算坏了（变异检查会故意弄坏）也一样：「本机的」LOCALAPPDATA 是
@@ -119,12 +119,12 @@ try {
         Check ((Snapshot $userLad) -eq $userBefore) "${Case}：「本机的」LOCALAPPDATA 被动过了"
     }
 
-    $noBat = New-FakePackage 'pkg-0.39'
+    $noBat = New-FakePackage 'pkg-0.38.2'
     $withBat = New-FakePackage 'pkg-0.38.1' -Bat
     Check ((@(Get-FetchPasses $noBat) -join ',') -eq 'cli') '没有批处理的包只跑命令行'
     Check ((@(Get-FetchPasses $withBat) -join ',') -eq 'cli,bat') '有批处理的包两遍都跑'
 
-    # ---- 1. 0.39 起的包（没有批处理）：只跑命令行那一遍，结果 pass，结果里写一句
+    # ---- 1. 0.38.2 起的包（没有批处理）：只跑命令行那一遍，结果 pass，结果里写一句
     $r = Invoke-FakeFetch $noBat
     Check $r.Pass "没有批处理的包应该 pass：$($r.Summary)"
     Check ($r.Summary -match '只跑了命令行这一遍') "结果里要写只跑了命令行：$($r.Summary)"
