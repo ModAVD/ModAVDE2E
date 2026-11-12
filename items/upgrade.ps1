@@ -5,7 +5,8 @@
 # 整个覆盖上去（avd 不动），然后核对：
 #  - 组包目录按包根清单的版本号是否上升判，缺清单时按构建号判；SDK 构建号相同只记说明。包根的 ModAVD.exe / tools\modavd.exe / tools\modavd-bridge.ps1 都在
 #  - 用包里的 tools\modavd.exe 开机，标记数据都在
-#  - set --data-gb 改大后开机扩满（旧模拟器建的 64 GB 盘）
+#  - 旧模拟器建的 64 GB 盘：新包的 modavd 有「自动扩盘」（0.8.0 起）时，升级后已经扩到 256 GB；
+#    没有时 set --data-gb 改大到 80 GB 后开机扩满
 #  - 升级后第一次用 modavd（管理器同一套）照常开机，旧实例自己装上执行桥（10-30 起用户不用自己装）。
 #    旧版建的实例没有开机标记、mas-avd.json 里也没有 bridge 一项：新建后删掉标记来模拟。升级前和查数据、扩盘那几次
 #    开机带 --no-bridge（旧模拟器不认标记，也不让装桥打乱前面的核对）。
@@ -201,13 +202,27 @@ cat /sdcard/Download/upgrade-marker.txt
 echo "sdwait=$i lower=$(cat /data/media/0/Download/upgrade-marker.txt 2>&1)"
 '@).Replace('@TAG@', $tag)
     if (@($m | Where-Object { $_.Trim() -eq $tag }).Count -ne 2) { $problems += "标记数据不对：$($m -join ' / ')" } else { $notes += '旧实例照常开机、数据都在' }
-    Modavd stop $Index | Out-Null
 
-    $o = Modavd set $Index --data-gb 80
-    if ($LASTEXITCODE -ne 0) { $problems += "set --data-gb 80 失败：$($o -join ' ')" }
-    $o = Modavd start $Index --no-bridge
-    $gb = [math]::Round([int64](((SuRun 'df -k /data | tail -n 1') -join ' ') -split '\s+')[1] / 1MB, 1)
-    if ($gb -lt 78 -or -not ($o -match '数据盘已扩到')) { $problems += "改大到 80 GB 后 /data $gb GB" } else { $notes += "旧版建的 64 GB 盘改大到 80 GB（/data $gb GB）" }
+    # 管理器 0.8.0 起（ModAVDManager#132，ModAVD/ModAVD#153）数据盘分「自动扩盘 / 指定大小」：没写模式的旧实例算自动扩盘，
+    # 下次开机前就扩到 256 GB（这一项升级前后都用新包的 modavd 开机，所以多半在升级前那次就扩了），这时再改成 80 GB
+    # 会被拒（只能改大），所以改为核对升级后已经扩满。
+    # 新包的 modavd 还没有这两种模式（info 里没有 data_disk_mode）时照旧 set --data-gb 80。
+    $info = Modavd --json info $Index | Where-Object { $_ -like '{"ok"*' } | Select-Object -Last 1
+    $cfg = if ($info) { ($info | ConvertFrom-Json).data.config } else { $null }
+    if ($cfg -and $cfg.PSObject.Properties.Name -contains 'data_disk_mode') {
+        $gb = [math]::Round([int64](((SuRun 'df -k /data | tail -n 1') -join ' ') -split '\s+')[1] / 1MB, 1)
+        if ($cfg.data_disk_mode -ne 'auto' -or $cfg.data_partition_gb -lt 256 -or $gb -lt 250) {
+            $problems += "旧版建的 64 GB 盘升级后没有自动扩盘：模式 $($cfg.data_disk_mode)，配置 $($cfg.data_partition_gb) GB，/data $gb GB"
+        } else { $notes += "旧版建的 64 GB 盘是自动扩盘，升级后 $($cfg.data_partition_gb) GB（/data $gb GB）" }
+        Modavd stop $Index | Out-Null
+    } else {
+        Modavd stop $Index | Out-Null
+        $o = Modavd set $Index --data-gb 80
+        if ($LASTEXITCODE -ne 0) { $problems += "set --data-gb 80 失败：$($o -join ' ')" }
+        $o = Modavd start $Index --no-bridge
+        $gb = [math]::Round([int64](((SuRun 'df -k /data | tail -n 1') -join ' ') -split '\s+')[1] / 1MB, 1)
+        if ($gb -lt 78 -or -not ($o -match '数据盘已扩到')) { $problems += "改大到 80 GB 后 /data $gb GB" } else { $notes += "旧版建的 64 GB 盘改大到 80 GB（/data $gb GB）" }
+    }
 
     # 照常用 modavd 开机：旧实例自己装上执行桥（中间关机再开机一两次）
     Modavd stop $Index | Out-Null
