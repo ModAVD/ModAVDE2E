@@ -106,6 +106,13 @@
             TimeoutMin = 20
         }
         @{
+            Id = 'dataverify'; Title = '磁盘读写数据核对（ModAVD/ModAVD#138）'; Criterion = '客体写 1 GiB 固定花样（单次 4 KiB–1 MiB，普通写和 O_DIRECT 混着），sync、正常关机、冷启动后回读，0 个错字节'
+            Scopes = @('emulator', 'manager')
+            Script = '{Repo}\items\dataverify.ps1'
+            Args = @('-Sdk', '{Sdk}')
+            TimeoutMin = 25
+        }
+        @{
             Id = 'upgrade'; Title = '从上一个生产版本升级（照「怎么更新」整个覆盖新包）'; Criterion = '旧版建的实例照常开机、数据都在；版本号和包根新文件到位；旧盘扩满（0.8.0 起自动扩到 256 GB，以前改大到 80 GB）；升级后 modavd 照常开机自动装好执行桥'
             # 只改输入法、只重新打包时打包前不跑这项：程序没变，打完包用组包目录跑的那次（PostPackage）才有意义
             Scopes = @('emulator', 'bridge', 'manager', 'scripts')
