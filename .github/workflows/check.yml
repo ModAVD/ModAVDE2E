@@ -56,6 +56,9 @@ jobs:
       - name: Check the fetch item with and without the old batch file, and that it keeps LOCALAPPDATA private
         shell: pwsh
         run: ./tests/fetch-item.ps1
+      - name: Check the dataverify item pattern, plan and mismatch reporting against a fake guest
+        shell: pwsh
+        run: ./tests/dataverify.ps1
       - name: Scan tracked files for private identity and paths
         run: python3 .modavd/scripts/privacy.py .
 

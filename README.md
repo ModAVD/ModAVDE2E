@@ -27,7 +27,7 @@ ModAVD 仓库里的随包脚本 `package/` 和执行桥 `bridge/`，所以单独
 
 ## 怎么跑
 
-PowerShell 7（`pwsh`），辅助脚本用 Python 3.12。
+PowerShell 7（`pwsh`），辅助脚本用 Python 3.12；`dataverify` 项还要宿主装有 Go（编客体里的写入小程序）。
 
 ```powershell
 pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sdk <新 SDK> -Baseline <上一个发布版的 SDK>
@@ -69,7 +69,7 @@ pwsh -NoProfile -File regress.ps1 -Suite suites\release.psd1 -Scope emulator -Sd
 | `PackageScripts` | ModAVD 仓库的 `package\`（装桥脚本 `modavd-bridge.ps1` 在里面） | 运行器、bridge、upgrade、game-real |
 | `ProductionRoots` | 测试不碰的根目录，在 `D:\ModAVD` 之外再加（不是替换它）：你自己日常在用的根也写进来。测试根、输出、工作目录、实例目录在它们下面就停 | 运行器、各项 |
 | `TestRoots` | 回归只许用的测试根（可以不写）：写了就只认列出来的根目录本身，`TestRoot`、`PackageRoot`、`-Root` 指到别处就停 | 运行器、各项 |
-| `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（`mas-avd.json` 里要写自己的 `adbServerPort`、`scriptAdbServerPort` 和 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）、没写这两个 adb 端口就停，不新建 | bridge、bridge-default、datadisk、yys |
+| `TestRoot` | 测试用的 ModAVD 根目录：`E:\testbed` 下已有的 flow-a / flow-b（`mas-avd.json` 里要写自己的 `adbServerPort`、`scriptAdbServerPort` 和 `portBase`；0 号已装桥、登着阴阳师测试号，其余编号临时建、跑完删）。不是已有根目录（没有 `mas-avd.json`）、没写这两个 adb 端口就停，不新建 | bridge、bridge-default、datadisk、dataverify、yys |
 | `PackageRoot` | 装包类的项用的测试根（不写就用 `TestRoot`）：先装成要测的包，测完根目录停在新包上 | upgrade、ime-pkg |
 | `PrevPackage` | 上一个生产版的组包目录（固定副本） | upgrade |
 | `ComponentCache` | 放着 `platform-tools_r37.0.1-win.zip`、`x86_64-34_r14.zip` 的目录（可以没有：没有就从网上下载一次） | fetch |
@@ -131,6 +131,7 @@ REGRESS-RESULT {"pass":true,"summary":"到登录页 41 秒；进游戏后 52.7 f
 | ark / r1999 / sr / ef | `items\game-real.ps1` | 各游戏自己的自动化脚本实跑 15 分钟（装桥那轮），帧率和 `baselines\fps.json` 比 |
 | bridge | `items\bridge.ps1` | 执行桥装 / 卸全流程（Windows PowerShell 5.1），新建 6 号实例跑完删掉 |
 | datadisk | `items\datadisk.ps1` | 新盘 inode 封顶、`set --data-gb` 扩容，新建 3 号实例跑完删掉 |
+| dataverify | `items\dataverify.ps1` | 磁盘读写数据核对（ModAVD/ModAVD#138）：新建 4 号实例，在客体 `/data/unencrypted/` 里写一个由种子算出的 1 GiB 花样文件（单次 4 KiB–1 MiB，普通写和 `O_DIRECT` 混着），`sync`、清页缓存回读一次哈希；再正常关机、冷启动，回读哈希和宿主按种子算的比对，不一致就拉回来报第一个不同的偏移和错字节数；跑完删文件、删实例。`-SizeMiB` 改总量，`-Seed`、`-DirectPercent` 改花样和直写比例，`-Keep` 留着实例。客体的 `dd` 没有 `oflag=direct`，写入用 `items\dataverify-guest.go`，宿主上要有 Go 来编 |
 | upgrade | `items\upgrade.ps1` | 在 `PackageRoot` 上先按包根清单装回上一版正式包、建临时实例写数据，照「怎么更新」覆盖新包后核对开机、数据、扩容、照常开机自动装桥；`-Next` 是组包目录（带 `components\modavd-ime.apk`）时还核对宿主输入法跟着包过来、装上的是正式签名那份并设为默认（`-Next` 是 SDK 时不查）；跑完删临时实例，根目录停在新包上 |
 | yys | `items\yys.ps1` | 阴阳师冷启动进游戏测帧（测试根的 0 号，已装桥、已登录），再用 MaaYYs（`items\maayys_run.py`）真打御魂 |
 | ef-ab | `items\ef-ab.ps1` | 终末地冷启动新旧交替，等宿主空闲才测 |
