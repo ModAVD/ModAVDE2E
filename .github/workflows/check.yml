@@ -62,6 +62,59 @@ jobs:
       - name: Scan tracked files for private identity and paths
         run: python3 .modavd/scripts/privacy.py .
 
+  authors:
+    name: Commit authors and trailers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # Empty outside pull_request: the script then checks origin/main..HEAD.
+      REPO_CHECK_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+      REPO_CHECK_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+    steps:
+      - name: Checkout full history without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run repo checks unit tests
+        run: python3 -B -I -X utf8 scripts/test_repo_checks.py -v
+      # PR 里的提交在 pull_request 时已经查过。push 和 merge_group 下要查的只剩 GitHub 生成的 squash 提交，
+      # 它的作者邮箱取自贡献者 GitHub 账号的设置，不归作者检查管；查了会让合并队列和 main 无端变红。
+      - name: Check commit authors and trailers
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        run: python3 -B -I -X utf8 scripts/repo_checks.py
+
+  shared-scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout ModAVD for the shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ModAVD/ModAVD
+          ref: main
+          path: .modavd
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/repo_checks.py
+            scripts/test_repo_checks.py
+          sparse-checkout-cone-mode: false
+      - name: Shared scripts are ModAVD's
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in scripts/repo_checks.py scripts/test_repo_checks.py; do
+            if ! cmp -s "$f" ".modavd/$f"; then
+              echo "::error file=$f::$f differs from ModAVD/ModAVD main. These scripts are changed in ModAVD first; copy its $f here byte for byte."
+              exit 1
+            fi
+          done
+          echo "repo_checks.py and test_repo_checks.py are the same as ModAVD/ModAVD main $(git -C .modavd rev-parse --short HEAD)"
+
   zizmor:
     name: Workflow security (zizmor)
     runs-on: ubuntu-24.04
